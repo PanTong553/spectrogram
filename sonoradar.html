@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>SonoRadar - Bat Spectrogram Viewer</title>
+  <link rel="stylesheet" href="style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+HK&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+  <link rel="icon" href="./favicon.ico" sizes="any" type="image/x-icon" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+</head>
+<body>
+
+  <div id="layout">
+    <!-- Sidebar -->
+  <div id="sidebar">
+    <!-- SonoRadar Branding Header -->
+    <div id="branding-header">
+      <img src="./favicon.ico" alt="SonoRadar Logo" id="branding-logo">
+      <div class="branding-text">
+        <div class="branding-title">SonoRadar</div>
+        <div class="branding-subtitle">Powered by Hong Kong Bat Radar</div>
+      </div>
+    </div>    
+    <div id="fileListHeaderRow">
+       <span id="fileListHeader">File List</span>
+       <span class="header-icons">
+         <span id="fileCount"></span>
+         <i id="clearAllBtn" class="fa-regular fa-file action-icon" title="Clear File List"></i>
+         <i id="clearTrashBtn" class="fas fa-trash action-icon" title="Clear Trash Files"></i>
+         <i id="trashProgramBtn" class="fa-solid fa-trash-arrow-up action-icon" title="Trash Program"></i>
+      </span>
+    </div>
+      <div id="searchContainer">
+        <input type="text" id="searchInput" placeholder="Search files...">
+        <button id="toggleEditBtn" class="sidebar-button" title="Edit mode">
+          <i class="fa-solid fa-pen-to-square"></i>
+        </button>
+      </div>
+      <ul id="fileList"></ul>
+        <div id="Metadata">
+          <div class="metadata-header">
+          <span class="section-title">GUANO Metadata:</span>
+            <i id="metadata-toggle" class="fa-solid fa-caret-down"></i>
+        </div>
+        <pre id="guano-output">(no file selected)</pre>
+      </div>
+  </div>
+  <div id="mainarea">  
+    <div id="control-bar">
+      <!-- Top Bar -->
+      <div id="top-bar">
+        <button id="toggleSidebarBtn" class="sidebar-button" title="Toggle File List">
+          <i class="fas fa-bars"></i>
+        </button>
+        <input type="file" id="fileInput" accept=".wav" multiple>
+        <button id="fileInputBtn" class="sidebar-button" title="Load files">
+          <i class="fa-solid fa-cloud-arrow-up"></i>
+        </button>
+        <span id="currentFilePath" class="file-path-display">
+          <i class="fa-regular fa-file-audio"></i>
+          <span id="fileNameText">Upload wav file(s)</span>
+        </span>
+        <button id="prevBtn" title="Previous file (↑)" class="sidebar-button"><i class="fas fa-arrow-up"></i></button>
+        <button id="nextBtn" title="Next file (↓)" class="sidebar-button"><i class="fas fa-arrow-down"></i></button>
+        <button id="toggleTagModeBtn" title="Tag mode" class="sidebar-button"><i class="fa-solid fa-tags"></i></button>
+        <button id="autoIdBtn" title="Auto ID (Ctrl + I)" class="sidebar-button"><i class="fa-solid fa-circle-info"></i></button>
+        <button id="playPauseBtn" title="Play (Ctrl + P)" class="sidebar-button"><i class="fa-solid fa-play"></i></button>
+        <button id="stopBtn" title="Stop" class="sidebar-button"><i class="fa-solid fa-stop"></i></button>
+        <button id="exportBtn" title="Export" class="sidebar-button"><i class="fa-solid fa-file-export"></i></button>
+        <button id="mapBtn" title="Map (Ctrl+M)" class="sidebar-button"><i class="fa-solid fa-map-location-dot"></i></button>
+        <button id="setting" title="Spectrogram setting (Ctrl+S)" class="sidebar-button"><i class="fa-solid fa-sliders"></i></button>
+        <button id="expandBackBtn" title="Back to previous session (Backspace)" class="sidebar-button">
+          <i class="fa-solid fa-reply"></i>
+          <span id="expandBackCount" class="expand-back-count"></span>
+        </button>
+      </div>
+      <!-- Tool Bar -->    
+      <div id="tool-bar">
+        <label class="slider-label">Type
+          <button id="windowTypeInput" class="dropdown-button" title="Window Type">hann</button>
+        </label>        
+        <label class="slider-label">Fs
+          <button id="sampleRateInput" class="dropdown-button" title="Sampling rate (kHz)">256</button>
+        </label>
+        <label class="slider-label">FFT
+          <button id="fftSizeInput" class="dropdown-button" title="FFT Size">1024</button>
+        </label>
+        <label class="slider-label">Overlap
+          <input type="number" id="overlapInput" title="Overlap Size (1-99)" placeholder="Auto" min="1" max="99" step="1">
+          <button id="quickPresetBtn" class="toolbar-button" title="Quick Screening Mode"><i class="fa-solid fa-bolt"></i></button>
+        </label>
+        <div class="toolbar-divider"></div>
+        <label class="slider-label">F.Range
+          <input type="number" id="freqMinInput" class="freq-input" title="Minimun frequency (kHz)" value="10" min="0" max="192" step="1"> -
+          <input type="number" id="freqMaxInput" class="freq-input" title="Maximum frequency (kHz)" value="128" min="1" max="192" step="1">
+        </label>
+        <button id="applyFreqRangeBtn" title="Apply frequency range" class="toolbar-button"><i class="fa-solid fa-check"></i></button>
+        <div class="toolbar-break"></div>
+        <i class="fa-solid fa-circle-half-stroke contrast-icon"></i>
+        <input type="range" id="contrastSlider" min="0.5" max="2" step="0.05" value="1.25" title="Contrast">
+        <span class="slider-value" id="contrastVal">1</span>
+        <i class="fa-solid fa-plus-minus gain-icon"></i>
+        <input type="range" id="gainSlider" min="0.5" max="4" step="0.1" value="2.1" title="Gain">
+        <span class="slider-value" id="gainVal">2</span>
+        <i class="fa-solid fa-sun brightness-icon"></i>
+        <input type="range" id="brightnessSlider" min="-0.2" max="0.5" step="0.01" value="-0.06" title="Brightness">
+        <span class="slider-value" id="brightnessVal">0</span>        
+        <button id="resetButton" title="Reset Brightness, Contrast & Gain to default" class="toolbar-button"><i class="fas fa-rotate-left"></i></button>
+        <div class="toolbar-divider"></div>                                                                                                                     
+        <label class="slider-label">Line
+          <label class="switch" title="Show 10kHz Lines">
+            <input type="checkbox" id="toggleGridSwitch">
+            <span class="slider round"></span>
+          </label>
+        </label>
+      </div>
+      <div id="auto-id-panel" class="map-popup">
+        <div class="popup-drag-bar">
+          <span class="popup-title">Auto ID Panel</span>
+          <button class="popup-close-btn" title="Close">&times;</button>
+        </div>
+  <div id="QCF-duration-warning" class="coord-scale-wrapper">
+          Duration of QCF should be =&gt;1ms
+        </div>
+  <div id="QCF-slope-warning" class="coord-scale-wrapper">
+          Slope of QCF should be &lt; 1 and =&gt; 0.1 kHz/ms
+        </div>
+        <div id="highfreq-warning" class="coord-scale-wrapper" style="display:none">
+          The high frequency should be the highest one
+        </div>
+        <div id="lowfreq-warning" class="coord-scale-wrapper" style="display:none">
+          The low frequency should be the lowest one
+        </div>
+        <div id="knee-order-warning" class="coord-scale-wrapper">
+          The knee frequency should be higher than the lowest frequency
+        </div>
+        <div id="startfreq-warning" class="coord-scale-wrapper">
+          The start frequency should be the first one.
+        </div>
+        <div id="endfreq-warning" class="coord-scale-wrapper">
+          The end frequency should be the last one.
+        </div>
+        <div class="autoid-body">
+          <div class="autoid-tabs-row">
+            <div id="autoid-tabs"></div>
+            <button id="autoIdTabResetBtn" class="panel-reset-btn" title="Reset active tab">
+              <i class="fa-solid fa-rotate-left"></i>
+            </button>
+          </div>
+          <div id="autoid-fields">
+        <div class="autoid-row" id="callTypeRow">
+          <span class="autoid-label">Call type:</span>
+          <div class="autoid-field">
+            <button id="callTypeInput" class="dropdown-button">CF-FM</button>
+          </div>
+        </div>
+        <div class="autoid-row" id="harmonicRow">
+          <span class="autoid-label">Harmonic:</span>
+          <div class="autoid-field">
+            <button id="harmonicInput" class="dropdown-button">0</button>
+          </div>
+        </div>
+        <div class="autoid-row" id="cfStartFreqRow">
+          <span class="autoid-label">CF start:</span>
+          <div class="autoid-field">
+            <input id="cfStartFreqInput" class="autoid-input" type="text" readonly title="Click on spectrogram to acquire CF Start Frequency">
+            <span class="autoid-unit">kHz</span>
+            <button class="autoid-marker marker-cfstart" data-key="cfStart" title="Reset CF start freq.">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </div>
+        <div class="autoid-row" id="cfEndFreqRow">
+          <span class="autoid-label">CF end:</span>
+          <div class="autoid-field">
+            <input id="cfEndFreqInput" class="autoid-input" type="text" readonly title="Click on spectrogram to acquire CF End Frequency">
+            <span class="autoid-unit">kHz</span>
+            <button class="autoid-marker marker-cfend" data-key="cfEnd" title="Reset CF end freq.">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </div>
+        <div class="autoid-row" id="startFreqRow">
+          <span class="autoid-label">Start freq.:</span>
+          <div class="autoid-field">
+            <input id="startFreqInput" class="autoid-input" type="text" readonly title="Click on spectrogram to acquire Start Frequency">
+            <span class="autoid-unit">kHz</span>
+            <button class="autoid-marker marker-start" data-key="start" title="Reset Start freq.">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </div>
+        <div class="autoid-row" id="endFreqRow">
+          <span class="autoid-label">End freq.:</span>
+          <div class="autoid-field">
+            <input id="endFreqInput" class="autoid-input" type="text" readonly title="Click on spectrogram to acquire End Frequency">
+            <span class="autoid-unit">kHz</span>
+            <button class="autoid-marker marker-end" data-key="end" title="Reset End freq.">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </div>
+        <div class="autoid-row" id="highFreqRow">
+          <span class="autoid-label">High freq.:</span>
+          <div class="autoid-field">
+            <input id="highFreqInput" class="autoid-input" type="text" readonly title="Click on spectrogram to acquire Highest Frequency">
+            <span class="autoid-unit">kHz</span>
+            <button class="autoid-marker marker-high" data-key="high" title="Reset High freq.">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </div>
+        <div class="autoid-row" id="lowFreqRow">
+          <span class="autoid-label">Low freq.:</span>
+          <div class="autoid-field">
+            <input id="lowFreqInput" class="autoid-input" type="text" readonly title="Click on spectrogram to acquire Lowest Frequency">
+            <span class="autoid-unit">kHz</span>
+            <button class="autoid-marker marker-low" data-key="low" title="Reset Low freq.">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </div>
+        <div class="autoid-row" id="kneeFreqRow">
+          <span class="autoid-label">Knee freq.:</span>
+          <div class="autoid-field">
+            <input id="kneeFreqInput" class="autoid-input" type="text" readonly title="Click on spectrogram to acquire Knee Frequency">
+            <span class="autoid-unit">kHz</span>
+            <button class="autoid-marker marker-knee" data-key="knee" title="Reset Knee freq.">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </div>
+        <div class="autoid-row" id="heelFreqRow">
+          <span class="autoid-label">Heel freq.:</span>
+          <div class="autoid-field">
+            <input id="heelFreqInput" class="autoid-input" type="text" readonly title="Click on spectrogram to acquire Heel Frequency">
+            <span class="autoid-unit">kHz</span>
+            <button class="autoid-marker marker-heel" data-key="heel" title="Reset Heel freq.">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </div>
+        <div class="autoid-row">
+          <span class="autoid-label">Bandwidth:</span>
+          <div class="autoid-field">
+            <span id="bandwidthVal">-</span>
+            <span class="autoid-unit">kHz</span>
+          </div>
+        </div>
+        <div class="autoid-row">
+          <span class="autoid-label">Duration:</span>
+          <div class="autoid-field">
+            <span id="durationVal">-</span>
+            <span class="autoid-unit">ms</span>
+          </div>
+        </div>
+        </div>
+        <div class="autoid-action-row">
+          <button id="pulseIdBtn" class="autoid-action-btn" title="Pulse ID (Ctrl + Enter)">Pulse ID</button>
+          <button id="sequenceIdBtn" class="autoid-action-btn" title="Sequence ID (Shift + Enter)">Sequence ID</button>
+        </div>
+        <div class="autoid-result-row">
+          <span class="autoid-result-label">Result: <span id="autoIdResult">-</span></span>
+        </div>
+      </div>
+      </div>
+    </div>
+<!-------- Spectrogram Start -------->
+    <div id="spectrogram-wrapper">
+      <div id="tag-panel">
+        <div class="tag-title">
+          <span>Species Tags&nbsp;</span><i class="fas fa-tags"></i>
+        </div>
+      </div>
+      <div id="whole-spectrogram">
+      <div id="spectrogram-settings">
+        <span id="spectrogram-settings-text"></span>
+        <canvas id="color-bar" width="600" height="20"></canvas>
+      </div>
+      <div class="viewer-row">
+        <div id="freq-axis-wrapper">
+          <div id="freq-label">Frequency (kHz)</div>
+          <div id="freq-axis"></div>
+        </div>
+          <div id="viewer-wrapper">
+          <div id="drop-overlay">
+            <div class="drop-border"></div>
+            <div class="drop-message">
+              <i class="fas fa-cloud-arrow-up drop-icon"></i>
+              <div>Drop WAV file(s) or folder here</div>
+            </div>
+            </div>
+            <div id="loading-overlay" class="loading-overlay">
+              <div class="spinner"></div>
+            </div>
+            <div id="upload-overlay" class="upload-overlay">
+              <div class="spinner"></div>
+              <div class="progress-container">
+                <div class="progress-bar" id="upload-progress-bar"></div>
+              </div>
+              <div id="upload-progress-text" class="progress-text">0/0</div>
+            </div>
+            <div id="viewer-container">
+            <div id="spectrogram-only"><canvas id="spectrogram-canvas"></canvas></div>
+            <canvas id="freq-grid"></canvas>
+          </div>
+          <div id="fixed-overlay">
+          <div id="hover-line" class="hover-line-horizontal"></div>
+          <div id="hover-line-vertical" class="hover-line-vertical"></div>
+          <div id="progress-line" class="progress-line"></div>
+          <div id="hover-label">-</div>
+            <div id="zoom-controls">
+              <button class="zoom-button" id="zoom-in" title="zoom-in (CTRL+↑)">+</button>
+              <button class="zoom-button" id="zoom-out" title="zoom-out (CTRL+↓)">−</button>
+              <button id="expand-btn" class="zoom-button" title="Fit to Window (CTRL+0)"><i class="fas fa-expand"></i></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    <div id="time-axis-wrapper">
+      <div id="time-axis"></div>
+    </div>
+    <div id="time-label">Time (ms)</div>
+  </div>
+    </div>
+<!-------- Spectrogram End -------->
+  <div id="mapPopup" class="map-popup">
+    <div class="popup-drag-bar">
+      <button class="popup-min-btn" title="Minimize"><i class="fa-solid fa-window-minimize"></i></button>
+      <button class="popup-max-btn" title="Maximize"><i class="fa-regular fa-square"></i></button>
+      <button class="popup-close-btn" title="Close">&times;</button>
+    </div>
+    <div id="map">
+      <div id="map-drop-overlay">
+        <div class="drop-border"></div>
+        <div class="drop-message">
+          <i class="fas fa-cloud-arrow-up drop-icon"></i>
+          <div>Drop KML file here</div>
+        </div>
+      </div>
+      <div class="coord-scale-wrapper"><span id="coord-display"></span></div>
+      <div id="no-coord-message" class="coord-scale-wrapper">This wav file without coordinates</div>
+      <div id="copy-coord-message" class="coord-scale-wrapper">The coordinates have been copied to the clipboard</div>
+    </div>
+  </div>
+  <script type="module" src="./main.js"></script>
+  </div>
+</body>
+</html>
