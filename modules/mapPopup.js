@@ -78,6 +78,7 @@ export function initMapPopup({
   let drawControl = null;
   let drawnItems = null;
   let drawControlVisible = false;
+  let drawingActive = false;
   let layersControl = null;
   let hkgridLayer = null;
   const coordScaleWrapper = mapDiv.querySelector('.coord-scale-wrapper');
@@ -357,12 +358,47 @@ export function initMapPopup({
         circle: { shapeOptions: { renderer: canvasRenderer, pane: 'annotationPane' } }
       }
     });
+    // debug hooks to help diagnose draw flow
+    try {
+      map.on('click', (e) => {
+        console.debug('[map] click', { drawControlVisible, drawingActive, target: e.originalEvent?.target?.tagName });
+      });
+      map.on('mousedown', (e) => {
+        console.debug('[map] mousedown', { drawControlVisible, drawingActive, target: e.originalEvent?.target?.tagName });
+      });
+      if (L.Draw && L.Draw.Event) {
+        map.on(L.Draw.Event.DRAWSTART, () => console.debug('[draw] DRAWSTART'));
+        map.on(L.Draw.Event.DRAWVERTEX, () => console.debug('[draw] DRAWVERTEX'));
+        map.on(L.Draw.Event.DRAWSTOP, () => console.debug('[draw] DRAWSTOP'));
+        map.on(L.Draw.Event.CREATED, () => console.debug('[draw] CREATED'));
+      }
+    } catch (err) {
+      // ignore in production
+    }
     map.on(L.Draw.Event.CREATED, (e) => {
       if (e.layer && e.layer instanceof L.Path) {
         e.layer.options.renderer = canvasRenderer;
         e.layer.options.pane = 'annotationPane';
       }
       drawnItems.addLayer(e.layer);
+    });
+
+    // Ensure drawing start/stop properly manage map interactions and avoid
+    // conflicts with other click handlers (eg. text mode)
+    map.on(L.Draw.Event.DRAWSTART, () => {
+      drawingActive = true;
+      try { map.dragging.disable(); } catch (err) {}
+      // remove text click while drawing to avoid adding text markers
+      try { map.off('click', onMapTextClick); } catch (err) {}
+    });
+
+    map.on(L.Draw.Event.DRAWSTOP, () => {
+      drawingActive = false;
+      try { map.dragging.enable(); } catch (err) {}
+      // restore text click handler if text mode active
+      if (textMode) {
+        try { map.on('click', onMapTextClick); } catch (err) {}
+      }
     });
 
     const RouteToggleControl = L.Control.extend({
@@ -691,6 +727,17 @@ export function initMapPopup({
       toggleTextMode();
     }
     if (drawControlVisible) {
+      // disable any active draw handlers to avoid leftover handlers
+      try {
+        const toolbar = drawControl._toolbars && drawControl._toolbars.draw;
+        if (toolbar && toolbar._modes) {
+          Object.values(toolbar._modes).forEach((mode) => {
+            if (mode && mode.handler && mode.handler._enabled) {
+              try { mode.handler.disable(); } catch (e) {}
+            }
+          });
+        }
+      } catch (e) {}
       map.removeControl(drawControl);
       drawBtn?.classList.remove('active');
       drawControlVisible = false;
@@ -1091,7 +1138,7 @@ export function initMapPopup({
 
   if (dragBar) {
     dragBar.addEventListener('mousedown', (e) => {
-      if (isMaximized) return;
+  if (isMaximized || drawingActive) return;
       dragging = true;
       offsetX = e.clientX - popup.offsetLeft;
       offsetY = e.clientY - popup.offsetTop;
@@ -1104,7 +1151,9 @@ export function initMapPopup({
   }
 
   popup.addEventListener('mousemove', (e) => {
-    if (isMaximized) return;
+  // don't interfere with events inside the leaflet map container
+  if (map && map.getContainer && map.getContainer().contains(e.target)) return;
+  if (isMaximized || drawingActive) return;
     if (dragging || resizing) {
       e.stopPropagation();
       return;
@@ -1127,7 +1176,9 @@ export function initMapPopup({
   });
 
   popup.addEventListener('mousedown', (e) => {
-    if (isMaximized) return;
+  // don't interfere with interactions originating from inside the leaflet map
+  if (map && map.getContainer && map.getContainer().contains(e.target)) return;
+  if (isMaximized) return;
     if (e.target === dragBar || dragBar.contains(e.target)) return;
     const state = getEdgeState(e.clientX, e.clientY);
     if (state.onLeft || state.onRight || state.onTop || state.onBottom) {
@@ -1155,7 +1206,10 @@ export function initMapPopup({
   });
 
   document.addEventListener('mousemove', (e) => {
-    if (popup.style.display !== 'block' || isMaximized) return;
+  // ignore events that start inside the map container so Leaflet can handle them
+  if (map && map.getContainer && map.getContainer().contains(e.target)) return;
+  if (drawingActive) return;
+  if (popup.style.display !== 'block' || isMaximized) return;
     if (dragging || resizing) {
       e.stopPropagation();
       return;
@@ -1177,6 +1231,9 @@ export function initMapPopup({
   }, true);
 
   document.addEventListener('mousedown', (e) => {
+    // ignore mousedown inside map container
+    if (map && map.getContainer && map.getContainer().contains(e.target)) return;
+    if (drawingActive) return;
     if (popup.style.display !== 'block' || isMaximized) return;
     if (dragging || resizing) {
       e.stopPropagation();
@@ -1210,8 +1267,10 @@ export function initMapPopup({
   }, true);
 
   window.addEventListener('mousemove', (e) => {
-    if (isMaximized) return;
-    if (dragging) {
+  // ignore window moves when pointer originally over map container
+  if (map && map.getContainer && map.getContainer().contains(document.elementFromPoint(e.clientX, e.clientY))) return;
+  if (isMaximized || drawingActive) return;
+  if (dragging) {
       popup.style.left = `${e.clientX - offsetX}px`;
       popup.style.top = `${e.clientY - offsetY}px`;
       e.stopPropagation();
@@ -1247,7 +1306,9 @@ export function initMapPopup({
   }, true);
 
   window.addEventListener('mouseup', (e) => {
-    if (isMaximized) return;
+  // ignore window mouseup if it occurred over the map container
+  if (map && map.getContainer && map.getContainer().contains(document.elementFromPoint(e.clientX, e.clientY))) return;
+  if (isMaximized || drawingActive) return;
     if (dragging) {
       dragging = false;
       map?.dragging.enable();
