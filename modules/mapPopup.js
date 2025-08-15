@@ -350,6 +350,12 @@ export function initMapPopup({
         e.layer.options.pane = 'annotationPane';
       }
       drawnItems.addLayer(e.layer);
+      
+      // 重新啟用繪圖控制項，以便能繼續建立新的物件
+      if (drawControlVisible) {
+        map.removeControl(drawControl);
+        drawControl.addTo(map);
+      }
     });
 
     const RouteToggleControl = L.Control.extend({
