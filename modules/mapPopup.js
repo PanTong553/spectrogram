@@ -351,6 +351,21 @@ export function initMapPopup({
       }
       drawnItems.addLayer(e.layer);
     });
+    // --- Draw/Text mode handler fix ---
+    map.on(L.Draw.Event.DRAWSTART, () => {
+      drawingActive = true;
+      try { map.dragging.disable(); } catch (err) {}
+      // 強制移除 text click handler，避免干擾
+      try { map.off('click', onMapTextClick); } catch (err) {}
+    });
+    map.on(L.Draw.Event.DRAWSTOP, () => {
+      drawingActive = false;
+      try { map.dragging.enable(); } catch (err) {}
+      // 只在 textMode 時才恢復 text click handler
+      if (textMode) {
+        try { map.on('click', onMapTextClick); } catch (err) {}
+      }
+    });
 
     const RouteToggleControl = L.Control.extend({
       options: { position: 'topleft' },
@@ -674,6 +689,10 @@ export function initMapPopup({
   function toggleDrawControl() {
     if (!drawControl) return;
     const willShow = !drawControlVisible;
+    // 啟用 Draw 時，強制移除 text click handler
+    if (willShow) {
+      try { map.off('click', onMapTextClick); } catch (err) {}
+    }
     if (willShow && textMode) {
       toggleTextMode();
     }
