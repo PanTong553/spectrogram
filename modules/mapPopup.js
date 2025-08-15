@@ -78,6 +78,7 @@ export function initMapPopup({
   let drawControl = null;
   let drawnItems = null;
   let drawControlVisible = false;
+  let drawingActive = false;
   let layersControl = null;
   let hkgridLayer = null;
   const coordScaleWrapper = mapDiv.querySelector('.coord-scale-wrapper');
