@@ -9,6 +9,11 @@ export class Dropdown {
     this.isOpen = false;
     this.selectedIndex = -1;
     this._bindButton();
+    
+    // 將實例綁定到按鈕元素上，以便外部訪問
+    if (this.button) {
+      this.button._dropdown = this;
+    }
   }
 
   _createMenu() {
@@ -124,16 +129,30 @@ export class Dropdown {
     }
   }
 
-  select(index) {
+  select(index, options = { triggerOnChange: true }) {
+    if (index < 0 || index >= this.items.length) return;
+    
     this.selectedIndex = index;
     const value = this.items[index];
     const label = value.label ?? value;
-    this.button.textContent = label;
+    
+    // 更新按鈕文字
+    if (this.button) {
+      this.button.textContent = label;
+    }
+
+    // 更新選項的 selected 狀態
     const items = Array.from(this.menu.querySelectorAll('.dropdown-item'));
     items.forEach((el, idx) => {
-      el.classList.toggle('selected', idx === index);
+      // 使用 dataset.index 來確保正確的選中狀態
+      const itemIndex = parseInt(el.dataset.index, 10);
+      el.classList.toggle('selected', itemIndex === index);
     });
-    if (this.onChange) this.onChange(value, index);
+
+    // 觸發 onChange 事件（除非特別指定不要觸發）
+    if (options.triggerOnChange && this.onChange) {
+      this.onChange(value, index);
+    }
   }
 }
 

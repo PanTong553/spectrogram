@@ -193,10 +193,41 @@ export function initAutoIdPanel({
     const startfreqWarning = document.getElementById('startfreq-warning');
     const endfreqWarning = document.getElementById('endfreq-warning');
     const callType = callTypeDropdown.items[callTypeDropdown.selectedIndex];
+    const HighKneeTimeWarning = document.getElementById('highknee-time-warning');
+    const LowKneeTimeWarning = document.getElementById('lowknee-time-warning');
+    const HighHeelTimeWarning = document.getElementById('highheel-time-warning');
+    const LowHeelTimeWarning = document.getElementById('lowheel-time-warning');
     let showQCFDuration = false;
     let showQCFSlope = false;
-    
-    // QCF 檢查
+
+    // FM-QCF 檢查
+    if (callType === 'FM-QCF') {
+      // 取得 marker
+      const knee = markers.knee;
+      const heel = markers.heel;
+      const low = markers.low;
+      // 1. Knee, Heel, Low 都有值
+      if (knee?.freq != null && knee?.time != null && heel?.freq != null && heel?.time != null && low?.freq != null && low?.time != null) {
+        // 以 Knee 與 Heel 計算
+        const duration = (heel.time - knee.time) * 1000;
+        showQCFDuration = duration < 1;
+        const bw = Math.abs(heel.freq - knee.freq);
+        if (duration > 0) {
+          const slope = bw / duration;
+          showQCFSlope = !(slope < 1 && slope >= 0.1);
+        }
+      } else if (knee?.freq != null && knee?.time != null && low?.freq != null && low?.time != null && (heel?.freq == null || heel?.time == null)) {
+        // 2. Knee, Low 有值，Heel 無值
+        const duration = (low.time - knee.time) * 1000;
+        showQCFDuration = duration < 1;
+        const bw = Math.abs(low.freq - knee.freq);
+        if (duration > 0) {
+          const slope = bw / duration;
+          showQCFSlope = !(slope < 1 && slope >= 0.1);
+        }
+      }
+    }
+    // QCF 檢查（原本的 QCF 類型）
     if (callType === 'QCF') {
       let duration = null;
       const markerTimes = Object.values(markers)
@@ -270,29 +301,92 @@ export function initAutoIdPanel({
       }
     }
     
-    const showKneeOrder = !isNaN(knee) && !isNaN(low) && knee < low;
-    const hasWarnings = showQCFDuration || showQCFSlope || showHighFreqWarning || 
-                       showLowFreqWarning || showKneeOrder || showStartFreqWarning || 
-                       showEndFreqWarning;
+  // const showKneeOrder = !isNaN(knee) && !isNaN(low) && knee < low;
+  let hasWarnings = showQCFDuration || showQCFSlope || showHighFreqWarning || 
+             showLowFreqWarning || showStartFreqWarning || 
+             showEndFreqWarning;
+    // 新增 Knee/Heel/High/Low time 順序檢查
+    let showHighKneeTimeWarning = false;
+    let showLowKneeTimeWarning = false;
+    let showHighHeelTimeWarning = false;
+    let showLowHeelTimeWarning = false;
+
+    // 檢查 Knee 順序
+    if (inputs.knee.value !== '' && markers.knee?.time != null) {
+      if (inputs.high.value !== '' && markers.high?.time != null) {
+        if (markers.knee.time <= markers.high.time) {
+          showHighKneeTimeWarning = true;
+        }
+      }
+      if (inputs.low.value !== '' && markers.low?.time != null) {
+        if (markers.knee.time >= markers.low.time) {
+          showLowKneeTimeWarning = true;
+        }
+      }
+    }
+    // 檢查 Heel 順序
+    if (inputs.heel.value !== '' && markers.heel?.time != null) {
+      if (inputs.high.value !== '' && markers.high?.time != null) {
+        if (markers.heel.time <= markers.high.time) {
+          showHighHeelTimeWarning = true;
+        }
+      }
+      if (inputs.low.value !== '' && markers.low?.time != null) {
+        if (markers.heel.time >= markers.low.time) {
+          showLowHeelTimeWarning = true;
+        }
+      }
+    } 
+
+    hasWarnings = hasWarnings || showHighKneeTimeWarning || showLowKneeTimeWarning || 
+                  showHighHeelTimeWarning || showLowHeelTimeWarning;
     
     if (inputs.high) inputs.high.classList.toggle('warning', showHighFreqWarning);
-    if (inputs.low) inputs.low.classList.toggle('warning', showLowFreqWarning || showKneeOrder);
-    if (inputs.knee) inputs.knee.classList.toggle('warning', showKneeOrder);
-    if (inputs.start) inputs.start.classList.toggle('warning', showStartFreqWarning || showQCFDuration);
-    if (inputs.end) inputs.end.classList.toggle('warning', showEndFreqWarning || showQCFDuration);
+  if (inputs.low) inputs.low.classList.toggle('warning', showLowFreqWarning || (callType === 'FM-QCF' && (showQCFDuration || showQCFSlope) && !markers.heel?.time));
+  if (inputs.knee) inputs.knee.classList.toggle('warning', showHighKneeTimeWarning || showLowKneeTimeWarning || (callType === 'FM-QCF' && (showQCFDuration || showQCFSlope)));
+  if (inputs.heel) inputs.heel.classList.toggle('warning', showHighHeelTimeWarning || showLowHeelTimeWarning || (callType === 'FM-QCF' && markers.heel?.time && (showQCFDuration || showQCFSlope)));
+    if (inputs.start) inputs.start.classList.toggle('warning', showStartFreqWarning || (callType === 'QCF' && (showQCFDuration || showQCFSlope)));
+    if (inputs.end) inputs.end.classList.toggle('warning', showEndFreqWarning || (callType === 'QCF' && (showQCFDuration || showQCFSlope)));
     
-    if (QCFDurationWarning) QCFDurationWarning.style.display = showQCFDuration ? 'flex' : 'none';
-    if (QCFSlopeWarning) QCFSlopeWarning.style.display = showQCFSlope ? 'flex' : 'none';
-    if (highFreqWarning) highFreqWarning.style.display = showHighFreqWarning ? 'flex' : 'none';
-    if (lowFreqWarning) lowFreqWarning.style.display = showLowFreqWarning ? 'flex' : 'none';
-    if (kneeOrderWarning) kneeOrderWarning.style.display = showKneeOrder ? 'flex' : 'none';
+    if (QCFDurationWarning) {
+      QCFDurationWarning.style.display = showQCFDuration ? 'flex' : 'none';
+      QCFDurationWarning.textContent = 'Duration of QCF should be >= 1ms';
+    }
+    if (QCFSlopeWarning) {
+      QCFSlopeWarning.style.display = showQCFSlope ? 'flex' : 'none';
+      QCFSlopeWarning.textContent = 'Slope of QCF should be <1 and >=0.1kHz/ms';
+    }
+    if (highFreqWarning) {
+      highFreqWarning.style.display = showHighFreqWarning ? 'flex' : 'none';
+      highFreqWarning.textContent = 'High frequency should be the highest one';
+    }
+    if (lowFreqWarning) {
+      lowFreqWarning.style.display = showLowFreqWarning ? 'flex' : 'none';
+      lowFreqWarning.textContent = 'Low frequency should be the lowest one';
+    }
+        if (HighKneeTimeWarning) {
+          HighKneeTimeWarning.style.display = showHighKneeTimeWarning ? 'flex' : 'none';
+          HighKneeTimeWarning.textContent = 'Knee frequency should come after High frequency';
+        }
+        if (LowKneeTimeWarning) {
+          LowKneeTimeWarning.style.display = showLowKneeTimeWarning ? 'flex' : 'none';
+          LowKneeTimeWarning.textContent = 'Knee frequency should come before Low frequency';
+        }
+        if (HighHeelTimeWarning) {
+          HighHeelTimeWarning.style.display = showHighHeelTimeWarning ? 'flex' : 'none';
+          HighHeelTimeWarning.textContent = 'Heel frequency should come after High frequency';
+        }
+        if (LowHeelTimeWarning) {
+          LowHeelTimeWarning.style.display = showLowHeelTimeWarning ? 'flex' : 'none';
+          LowHeelTimeWarning.textContent = 'Heel frequency should come before Low frequency';
+        }
     if (startfreqWarning) {
       startfreqWarning.style.display = showStartFreqWarning ? 'flex' : 'none';
-      startfreqWarning.textContent = 'The start frequency should be the first one';
+      startfreqWarning.textContent = 'Start frequency should be the first one';
     }
     if (endfreqWarning) {
       endfreqWarning.style.display = showEndFreqWarning ? 'flex' : 'none';
-      endfreqWarning.textContent = 'The end frequency should be the last one';
+      endfreqWarning.textContent = 'End frequency should be the last one';
     }
     if (pulseIdBtn) pulseIdBtn.disabled = hasWarnings;
     if (sequenceIdBtn) sequenceIdBtn.disabled = hasWarnings;
@@ -925,10 +1019,8 @@ export function initAutoIdPanel({
   function onMarkerDrag(e) {
     if (!draggingKey || !markersEnabled) return;
     if (!markerWasDragged) {
-      resetCurvesForMarker(draggingKey);
-      updateLines();
+      markerWasDragged = true;
     }
-    markerWasDragged = true;
     const rect = viewer.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -947,8 +1039,19 @@ export function initAutoIdPanel({
     tabData[currentTab].endTime = endTime;
     markers[draggingKey].freq = freq;
     markers[draggingKey].time = time;
+
+    // 在每次拖動時找出並更新相鄰的 markers path
+    const markerEntries = Object.entries(markers)
+      .filter(([k, m]) => m.freq != null && m.time != null)
+      .sort((a, b) => a[1].time - b[1].time);
+    const idx = markerEntries.findIndex(([k]) => k === draggingKey);
+    // 移除相關 curves 以重新計算
+    if (idx > 0) resetCurvesForMarker(markerEntries[idx - 1][0]);
+    resetCurvesForMarker(draggingKey);
+    if (idx < markerEntries.length - 1) resetCurvesForMarker(markerEntries[idx + 1][0]);
+
     updateDerived();
-    updateMarkers();
+    updateMarkers(); // 這會調用 updateLines() 重新計算和繪製所有 path
   }
 
   function stopMarkerDrag() {
@@ -964,7 +1067,15 @@ export function initAutoIdPanel({
     validateMandatoryInputs();
     clearResult();
     if (key && markerWasDragged) {
+      // 找出 time 上排序的 marker key
+      const markerEntries = Object.entries(markers)
+        .filter(([k, m]) => m.freq != null && m.time != null)
+        .sort((a, b) => a[1].time - b[1].time);
+      const idx = markerEntries.findIndex(([k]) => k === key);
+      // 取得相鄰 marker key 並重置 path
+      if (idx > 0) resetCurvesForMarker(markerEntries[idx - 1][0]);
       resetCurvesForMarker(key);
+      if (idx < markerEntries.length - 1) resetCurvesForMarker(markerEntries[idx + 1][0]);
       updateLines();
     }
   }
@@ -1008,8 +1119,19 @@ export function initAutoIdPanel({
     if (key === 'end') endTime = time;
     tabData[currentTab].startTime = startTime;
     tabData[currentTab].endTime = endTime;
-    // 新增/更新 marker 時，重置受影響的 draggingHandle 並即時更新 path 弧度
-    resetCurvesForMarker(key, currentTab);
+
+    // 找出 time 上排序的 marker key
+    const markerEntries = Object.entries(markers)
+      .filter(([k, m]) => m.freq != null && m.time != null)
+      .sort((a, b) => a[1].time - b[1].time);
+    const idx = markerEntries.findIndex(([k]) => k === key);
+    // 取得相鄰 marker key
+    const affectedKeys = [key];
+    if (idx > 0) affectedKeys.push(markerEntries[idx - 1][0]);
+    if (idx < markerEntries.length - 1) affectedKeys.push(markerEntries[idx + 1][0]);
+    // 對自己與相鄰 marker 都重置 path
+    affectedKeys.forEach(k => resetCurvesForMarker(k, currentTab));
+
     updateDerived();
     updateMarkers();
     clearResult();

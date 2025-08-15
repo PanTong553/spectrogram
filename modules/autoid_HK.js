@@ -47,7 +47,7 @@ const speciesRules = [
     rules: [
       {
         callType: 'FM-CF-FM',
-        cfStart: [68, 75],
+        cfStart: [68, 73],
         duration: [30, 80]
       }
     ]
@@ -87,16 +87,22 @@ const speciesRules = [
   {
     name: 'Pipistrellus abramus',
     rules: [
-      {
+      { // 1-5 Bandwidth FM-QCF, QCF
         callType: 'QCF',
         lowestFreq: [44, 46]
       },
-      {
+      { // 5.1-15 Bandwidth FM-QCF
         callType: 'FM-QCF',
-        lowestFreq: [46, 50],
-        highestFreq: [60, 100],
-        kneeFreq: [46, 53],
-        kneeLowBandwidth: [0, 5],
+        bandwidth: [5.1, 15],
+        highestFreq: [52.1, 64],        
+        lowestFreq: [47, 49],
+        duration: [3.5, 7]
+      },      
+      { // 15.1-45 Bandwidth FM-QCF
+        callType: 'FM-QCF',
+        bandwidth: [15.1, 45],
+        highestFreq: [63.1, 96],        
+        lowestFreq: [48, 51],
         duration: [3, 6]
       }
     ]
@@ -107,6 +113,7 @@ const speciesRules = [
       { // 1-5 Bandwidth FM-QCF, QCF
         callType: 'FM-QCF, QCF',
         bandwidth: [1, 5],
+        highestFreq: [50, 61], 
         lowestFreq: [49, 56],
         duration: [5, 8.5]
       },      
@@ -120,8 +127,8 @@ const speciesRules = [
       { // 15.1-45 Bandwidth FM, FM-QCF
         callType: 'FM, FM-QCF',
         bandwidth: [15.1, 45], 
-        highestFreq: [65.1, 92],        
-        lowestFreq: [49.5, 55],
+        highestFreq: [65.1, 100],        
+        lowestFreq: [50, 55],
         duration: [6, 11]
       },      
       { // 15.1-60 Bandwidth FM, FM-QCF

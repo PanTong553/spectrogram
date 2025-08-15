@@ -929,22 +929,48 @@ export function initMapPopup({
 
   function toggleMaximize() {
     if (!isMaximized) {
-      prevWidth = popup.offsetWidth;
-      prevHeight = popup.offsetHeight;
-      prevLeft = popup.offsetLeft;
-      prevTop = popup.offsetTop;
+      // 如果是從最小化狀態直接最大化，只需要還原顯示元素
+      if (isMinimized) {
+        if (layersControlContainer) layersControlContainer.style.display = '';
+        if (zoomControlContainer) zoomControlContainer.style.display = '';
+        if (routeToggleContainer) routeToggleContainer.style.display = '';
+        if (exportControlContainer) exportControlContainer.style.display = '';
+        if (coordScaleWrapper) coordScaleWrapper.style.display = '';
+        if (textToggleContainer) textToggleContainer.style.setProperty('margin-top', '1px', 'important');
+        isMinimized = false;
+      } else {
+        // 只有在從浮動狀態切換到最大化時，才儲存當前狀態
+        floatingState.width = popup.offsetWidth;
+        floatingState.height = popup.offsetHeight;
+        floatingState.left = popup.offsetLeft;
+        floatingState.top = popup.offsetTop;
+        localStorage.setItem('mapFloatingWidth', floatingState.width);
+        localStorage.setItem('mapFloatingHeight', floatingState.height);
+        localStorage.setItem('mapFloatingLeft', floatingState.left);
+        localStorage.setItem('mapFloatingTop', floatingState.top);
+      }
+      // 設置最大化狀態
       popup.style.left = '0px';
       popup.style.top = '0px';
       popup.style.width = `${window.innerWidth -2}px`;
       popup.style.height = `${window.innerHeight -2}px`;
+      // 狀態：最大化
+      minBtn.innerHTML = '<i class="fa-solid fa-window-minimize"></i>';
+      minBtn.title = 'Minimize';
       maxBtn.innerHTML = '<i class="fa-regular fa-clone"></i>';
+      maxBtn.title = 'Restore Down';
       isMaximized = true;
     } else {
-      popup.style.width = `${prevWidth}px`;
-      popup.style.height = `${prevHeight}px`;
-      popup.style.left = `${prevLeft}px`;
-      popup.style.top = `${prevTop}px`;
+      // 從最大化狀態還原時，直接使用儲存的浮動視窗狀態
+      popup.style.width = `${floatingState.width}px`;
+      popup.style.height = `${floatingState.height}px`;
+      popup.style.left = `${floatingState.left}px`;
+      popup.style.top = `${floatingState.top}px`;
+      // 狀態：一般（非最大化/最小化）
+      minBtn.innerHTML = '<i class="fa-solid fa-window-minimize"></i>';
+      minBtn.title = 'Minimize';
       maxBtn.innerHTML = '<i class="fa-regular fa-square"></i>';
+      maxBtn.title = 'Maximize';
       isMaximized = false;
     }
     map?.invalidateSize();
@@ -952,16 +978,27 @@ export function initMapPopup({
 
   function toggleMinimize() {
     if (!isMinimized) {
-      if (isMaximized) toggleMaximize();
-      minPrevWidth = popup.offsetWidth;
-      minPrevHeight = popup.offsetHeight;
-      minPrevLeft = popup.offsetLeft;
-      minPrevTop = popup.offsetTop;
+      // 如果是從浮動狀態最小化，儲存當前狀態
+      if (!isMaximized) {
+        floatingState.width = popup.offsetWidth;
+        floatingState.height = popup.offsetHeight;
+        floatingState.left = popup.offsetLeft;
+        floatingState.top = popup.offsetTop;
+        localStorage.setItem('mapFloatingWidth', floatingState.width);
+        localStorage.setItem('mapFloatingHeight', floatingState.height);
+        localStorage.setItem('mapFloatingLeft', floatingState.left);
+        localStorage.setItem('mapFloatingTop', floatingState.top);
+      }
+      // 設置最小化狀態（從任何狀態都直接最小化）
       popup.style.left = '0px';
       popup.style.top = `${window.innerHeight - 362}px`;
       popup.style.width = '290px';
       popup.style.height = '360px';
+      // 狀態：最小化
       minBtn.innerHTML = '<i class="fa-solid fa-window-maximize"></i>';
+      minBtn.title = 'Restore Up';
+      maxBtn.innerHTML = '<i class="fa-regular fa-square"></i>';
+      maxBtn.title = 'Maximize';
       if (layersControlContainer) layersControlContainer.style.display = 'none';
       if (zoomControlContainer) zoomControlContainer.style.display = 'none';
       if (routeToggleContainer) routeToggleContainer.style.display = 'none';
@@ -969,12 +1006,18 @@ export function initMapPopup({
       if (coordScaleWrapper) coordScaleWrapper.style.display = 'none';
       if (textToggleContainer) textToggleContainer.style.setProperty('margin-top', '10px', 'important');
       isMinimized = true;
+      isMaximized = false; // 確保狀態正確
     } else {
-      popup.style.width = `${minPrevWidth}px`;
-      popup.style.height = `${minPrevHeight}px`;
-      popup.style.left = `${minPrevLeft}px`;
-      popup.style.top = `${minPrevTop}px`;
+      // 從最小化狀態還原，直接使用儲存的浮動視窗狀態
+      popup.style.width = `${floatingState.width}px`;
+      popup.style.height = `${floatingState.height}px`;
+      popup.style.left = `${floatingState.left}px`;
+      popup.style.top = `${floatingState.top}px`;
+      // 狀態：一般（非最大化/最小化）
       minBtn.innerHTML = '<i class="fa-solid fa-window-minimize"></i>';
+      minBtn.title = 'Minimize';
+      maxBtn.innerHTML = '<i class="fa-regular fa-square"></i>';
+      maxBtn.title = 'Maximize';
       if (layersControlContainer) layersControlContainer.style.display = '';
       if (zoomControlContainer) zoomControlContainer.style.display = '';
       if (routeToggleContainer) routeToggleContainer.style.display = '';
@@ -1002,14 +1045,14 @@ export function initMapPopup({
   let startTop = 0;
   let isMaximized = false;
   let isMinimized = false;
-  let prevWidth = 0;
-  let prevHeight = 0;
-  let prevLeft = 0;
-  let prevTop = 0;
-  let minPrevWidth = 0;
-  let minPrevHeight = 0;
-  let minPrevLeft = 0;
-  let minPrevTop = 0;
+  
+  // 儲存 Floating window 的最後狀態
+  let floatingState = {
+    width: parseInt(localStorage.getItem('mapFloatingWidth'), 10) || 500,
+    height: parseInt(localStorage.getItem('mapFloatingHeight'), 10) || 500,
+    left: parseInt(localStorage.getItem('mapFloatingLeft'), 10) || 100,
+    top: parseInt(localStorage.getItem('mapFloatingTop'), 10) || 100
+  };
 
   function disableUiPointerEvents() {
     if (viewer) {
@@ -1194,8 +1237,20 @@ export function initMapPopup({
     if (resizing) {
       resizing = false;
       map?.dragging.enable();
-      localStorage.setItem('mapPopupWidth', popupWidth);
-      localStorage.setItem('mapPopupHeight', popupHeight);
+      
+      // 只在非最小化和非最大化狀態時更新並儲存 Floating window 狀態
+      if (!isMinimized && !isMaximized) {
+        floatingState.width = popup.offsetWidth;
+        floatingState.height = popup.offsetHeight;
+        floatingState.left = popup.offsetLeft;
+        floatingState.top = popup.offsetTop;
+        
+        localStorage.setItem('mapFloatingWidth', floatingState.width);
+        localStorage.setItem('mapFloatingHeight', floatingState.height);
+        localStorage.setItem('mapFloatingLeft', floatingState.left);
+        localStorage.setItem('mapFloatingTop', floatingState.top);
+      }
+      
       map?.invalidateSize();
       document.body.style.cursor = '';
       popup.style.cursor = '';
