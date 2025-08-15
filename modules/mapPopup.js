@@ -333,29 +333,62 @@ export function initMapPopup({
 
     drawnItems = new L.FeatureGroup().addTo(map);
     const canvasRenderer = L.canvas({ pane: 'annotationPane' });
-    drawControl = new L.Control.Draw({
+    // 初始化 Draw Control 並設定編輯選項
+    const drawOptions = {
       position: 'topleft',
-      edit: { featureGroup: drawnItems },
+      edit: {
+        featureGroup: drawnItems,
+        poly: {
+          allowIntersection: false
+        }
+      },
       draw: {
         circlemarker: false,
-        polyline: {},
-        polygon: {},
-        rectangle: {},
-        circle: {}
+        polyline: {
+          repeatMode: true
+        },
+        polygon: {
+          allowIntersection: false,
+          repeatMode: true
+        },
+        rectangle: {
+          repeatMode: true
+        },
+        circle: {
+          repeatMode: true
+        }
       }
-    });
+    };
+
+    // 創建 Draw Control
+    drawControl = new L.Control.Draw(drawOptions);
+
+    // 處理新建物件事件
     map.on(L.Draw.Event.CREATED, (e) => {
-      if (e.layer && e.layer instanceof L.Path) {
-        e.layer.options.renderer = canvasRenderer;
-        e.layer.options.pane = 'annotationPane';
+      const layer = e.layer;
+      if (layer instanceof L.Path) {
+        layer.options.renderer = canvasRenderer;
+        layer.options.pane = 'annotationPane';
       }
-      drawnItems.addLayer(e.layer);
-      
-      // 重新啟用繪圖控制項，以便能繼續建立新的物件
+      drawnItems.addLayer(layer);
+
+      // 重新初始化 Draw Control 以確保功能正常
       if (drawControlVisible) {
         map.removeControl(drawControl);
+        drawControl = new L.Control.Draw(drawOptions);
         drawControl.addTo(map);
       }
+    });
+
+    // 處理編輯事件
+    map.on('draw:edited', (e) => {
+      const layers = e.layers;
+      layers.eachLayer((layer) => {
+        if (layer instanceof L.Path) {
+          layer.options.renderer = canvasRenderer;
+          layer.options.pane = 'annotationPane';
+        }
+      });
     });
 
     const RouteToggleControl = L.Control.extend({
@@ -680,17 +713,33 @@ export function initMapPopup({
   function toggleDrawControl() {
     if (!drawControl) return;
     const willShow = !drawControlVisible;
+    
     if (willShow && textMode) {
       toggleTextMode();
     }
+
     if (drawControlVisible) {
+      // 停用繪圖控制項
       map.removeControl(drawControl);
       drawBtn?.classList.remove('active');
       drawControlVisible = false;
     } else {
-      drawControl.addTo(map);
-      drawBtn?.classList.add('active');
-      drawControlVisible = true;
+      // 重新啟用繪圖控制項
+      if (map.hasLayer(drawnItems)) {
+        drawControl.addTo(map);
+        drawBtn?.classList.add('active');
+        drawControlVisible = true;
+      }
+    }
+
+    // 確保編輯功能可用
+    if (drawnItems && drawnItems.getLayers().length > 0) {
+      drawnItems.eachLayer(layer => {
+        if (layer instanceof L.Path) {
+          layer.options.editing || (layer.options.editing = {});
+          layer.editing.enable();
+        }
+      });
     }
   }
 
