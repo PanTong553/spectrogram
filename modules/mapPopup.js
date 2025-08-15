@@ -1135,6 +1135,8 @@ export function initMapPopup({
   });
 
   document.addEventListener('mousemove', (e) => {
+    // 若事件發生於地圖容器內，直接 return
+    if (map && map.getContainer && map.getContainer().contains(e.target)) return;
     if (popup.style.display !== 'block' || isMaximized) return;
     if (dragging || resizing) {
       e.stopPropagation();
