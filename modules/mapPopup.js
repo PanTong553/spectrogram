@@ -78,7 +78,6 @@ export function initMapPopup({
   let drawControl = null;
   let drawnItems = null;
   let drawControlVisible = false;
-  let drawingActive = false;
   let layersControl = null;
   let hkgridLayer = null;
   const coordScaleWrapper = mapDiv.querySelector('.coord-scale-wrapper');
@@ -333,65 +332,25 @@ export function initMapPopup({
       });
 
     drawnItems = new L.FeatureGroup().addTo(map);
-    // --- Custom Polyline Drawing ---
-    let customDrawing = false;
-    let customPoints = [];
-    let customLine = null;
-    let drawMode = null; // 'polyline' or 'polygon'
-
-    function startCustomDraw(mode = 'polyline') {
-      if (customDrawing) return;
-      customDrawing = true;
-      drawMode = mode;
-      customPoints = [];
-      if (customLine) {
-        map.removeLayer(customLine);
-        customLine = null;
+    const canvasRenderer = L.canvas({ pane: 'annotationPane' });
+    drawControl = new L.Control.Draw({
+      position: 'topleft',
+      edit: { featureGroup: drawnItems },
+      draw: {
+        circlemarker: false,
+        polyline: { shapeOptions: { renderer: canvasRenderer, pane: 'annotationPane' } },
+        polygon: { shapeOptions: { renderer: canvasRenderer, pane: 'annotationPane' } },
+        rectangle: { shapeOptions: { renderer: canvasRenderer, pane: 'annotationPane' } },
+        circle: { shapeOptions: { renderer: canvasRenderer, pane: 'annotationPane' } }
       }
-      map.getContainer().style.cursor = 'crosshair';
-      map.on('click', onCustomDrawClick);
-      map.on('mousemove', onCustomDrawMove);
-      map.on('dblclick', finishCustomDraw);
-    }
-
-    function onCustomDrawClick(e) {
-      customPoints.push(e.latlng);
-      if (customLine) {
-        customLine.setLatLngs(customPoints);
-      } else {
-        customLine = L.polyline(customPoints, { color: 'red', weight: 2 }).addTo(drawnItems);
+    });
+    map.on(L.Draw.Event.CREATED, (e) => {
+      if (e.layer && e.layer instanceof L.Path) {
+        e.layer.options.renderer = canvasRenderer;
+        e.layer.options.pane = 'annotationPane';
       }
-    }
-
-    function onCustomDrawMove(e) {
-      if (!customDrawing || customPoints.length === 0) return;
-      const tempPoints = customPoints.concat([e.latlng]);
-      if (customLine) {
-        customLine.setLatLngs(tempPoints);
-      }
-    }
-
-    function finishCustomDraw() {
-      if (!customDrawing) return;
-      customDrawing = false;
-      map.getContainer().style.cursor = '';
-      map.off('click', onCustomDrawClick);
-      map.off('mousemove', onCustomDrawMove);
-      map.off('dblclick', finishCustomDraw);
-      if (customLine) {
-        customLine.setLatLngs(customPoints);
-        customLine.setStyle({ color: 'blue' });
-      }
-    }
-
-    // UI: Add a simple button for demo
-    const customDrawBtn = L.DomUtil.create('button', 'leaflet-bar', map.getContainer());
-    customDrawBtn.innerText = 'Draw Polyline';
-    customDrawBtn.style.position = 'absolute';
-    customDrawBtn.style.top = '10px';
-    customDrawBtn.style.left = '10px';
-    customDrawBtn.style.zIndex = 10000;
-    customDrawBtn.onclick = () => startCustomDraw('polyline');
+      drawnItems.addLayer(e.layer);
+    });
 
     const RouteToggleControl = L.Control.extend({
       options: { position: 'topleft' },
@@ -715,10 +674,6 @@ export function initMapPopup({
   function toggleDrawControl() {
     if (!drawControl) return;
     const willShow = !drawControlVisible;
-    // 啟用 Draw 時，強制移除 text click handler
-    if (willShow) {
-      try { map.off('click', onMapTextClick); } catch (err) {}
-    }
     if (willShow && textMode) {
       toggleTextMode();
     }
@@ -1180,8 +1135,6 @@ export function initMapPopup({
   });
 
   document.addEventListener('mousemove', (e) => {
-    // 若事件發生於地圖容器內，直接 return
-    if (map && map.getContainer && map.getContainer().contains(e.target)) return;
     if (popup.style.display !== 'block' || isMaximized) return;
     if (dragging || resizing) {
       e.stopPropagation();
