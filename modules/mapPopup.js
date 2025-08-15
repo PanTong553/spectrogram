@@ -127,6 +127,11 @@ export function initMapPopup({
   });
 
   function updateCursor() {
+    // 如果繪圖控制項是可見的，不更改游標樣式
+    if (drawControlVisible) {
+      return;
+    }
+    
     if (isMapDragging) {
       mapDiv.style.cursor = 'grabbing';
     } else if (textMode) {
@@ -222,8 +227,16 @@ export function initMapPopup({
       const { lat, lng } = latlng;
       coordDisplay.textContent = `${lat.toFixed(4)} ${lng.toFixed(4)}`;
     }
-    map.on('mousemove', (e) => updateCoords(e.latlng));
-    map.on('move', () => updateCoords(map.getCenter()));
+    map.on('mousemove', (e) => {
+      if (!drawControlVisible) {
+        updateCoords(e.latlng);
+      }
+    });
+    map.on('move', () => {
+      if (!drawControlVisible) {
+        updateCoords(map.getCenter());
+      }
+    });
     updateCoords(map.getCenter());
 
     map.on('contextmenu', (e) => {
@@ -344,19 +357,6 @@ export function initMapPopup({
         circle: { shapeOptions: { renderer: canvasRenderer, pane: 'annotationPane' } }
       }
     });
-    // 監聽繪圖開始事件
-    map.on(L.Draw.Event.DRAWSTART, () => {
-      // 繪圖開始時，禁用地圖的拖曳功能以避免干擾
-      map.dragging.disable();
-    });
-
-    // 監聽繪圖停止事件
-    map.on(L.Draw.Event.DRAWSTOP, () => {
-      // 繪圖結束時，重新啟用地圖的拖曳功能
-      map.dragging.enable();
-    });
-
-    // 監聽圖形創建完成事件
     map.on(L.Draw.Event.CREATED, (e) => {
       if (e.layer && e.layer instanceof L.Path) {
         e.layer.options.renderer = canvasRenderer;
@@ -691,21 +691,20 @@ export function initMapPopup({
       toggleTextMode();
     }
     if (drawControlVisible) {
-      // 關閉繪圖模式時，確保清理所有進行中的繪圖
-      if (drawControl._toolbars.draw) {
-        Object.values(drawControl._toolbars.draw._modes).forEach(mode => {
-          if (mode.handler._enabled) {
-            mode.handler.disable();
-          }
-        });
-      }
       map.removeControl(drawControl);
       drawBtn?.classList.remove('active');
       drawControlVisible = false;
+      // 恢復地圖的原始狀態
+      map.dragging.enable();
+      updateCursor();
     } else {
       drawControl.addTo(map);
       drawBtn?.classList.add('active');
       drawControlVisible = true;
+      // 清除其他可能的互動狀態
+      if (textMode) {
+        textMode = false;
+      }
     }
   }
 
