@@ -338,19 +338,14 @@ export function initMapPopup({
       edit: { featureGroup: drawnItems },
       draw: {
         circlemarker: false,
-        polyline: true,
-        polygon: true,
-        rectangle: true,
-        circle: true
+        polyline: {},
+        polygon: {},
+        rectangle: {},
+        circle: {}
       }
-    }).addTo(map);
-    drawControlVisible = true;
+    });
     map.on(L.Draw.Event.CREATED, (e) => {
-      if (e.layer && e.layer instanceof L.Path) {
-        e.layer.options.renderer = canvasRenderer;
-        e.layer.options.pane = 'annotationPane';
-      }
-      drawnItems.addLayer(e.layer);
+  drawnItems.addLayer(e.layer);
     });
 
     const RouteToggleControl = L.Control.extend({
@@ -673,21 +668,19 @@ export function initMapPopup({
   }
 
   function toggleDrawControl() {
-    if (!drawControl || !map) return;
-    if (textMode) {
+    if (!drawControl) return;
+    const willShow = !drawControlVisible;
+    if (willShow && textMode) {
       toggleTextMode();
     }
-    drawBtn?.classList.toggle('active', !drawControlVisible);
-    drawControlVisible = !drawControlVisible;
-    
-    // 讓繪圖工具保持在地圖上，只是切換按鈕狀態
-    const handlers = drawControl._toolbars.draw._modes;
-    for (const type in handlers) {
-      if (handlers[type] && handlers[type].handler) {
-        if (drawControlVisible) {
-          handlers[type].handler.disable();
-        }
-      }
+    if (drawControlVisible) {
+      map.removeControl(drawControl);
+      drawBtn?.classList.remove('active');
+      drawControlVisible = false;
+    } else {
+      drawControl.addTo(map);
+      drawBtn?.classList.add('active');
+      drawControlVisible = true;
     }
   }
 
