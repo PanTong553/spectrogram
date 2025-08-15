@@ -344,6 +344,19 @@ export function initMapPopup({
         circle: { shapeOptions: { renderer: canvasRenderer, pane: 'annotationPane' } }
       }
     });
+    // 監聽繪圖開始事件
+    map.on(L.Draw.Event.DRAWSTART, () => {
+      // 繪圖開始時，禁用地圖的拖曳功能以避免干擾
+      map.dragging.disable();
+    });
+
+    // 監聽繪圖停止事件
+    map.on(L.Draw.Event.DRAWSTOP, () => {
+      // 繪圖結束時，重新啟用地圖的拖曳功能
+      map.dragging.enable();
+    });
+
+    // 監聽圖形創建完成事件
     map.on(L.Draw.Event.CREATED, (e) => {
       if (e.layer && e.layer instanceof L.Path) {
         e.layer.options.renderer = canvasRenderer;
@@ -678,6 +691,14 @@ export function initMapPopup({
       toggleTextMode();
     }
     if (drawControlVisible) {
+      // 關閉繪圖模式時，確保清理所有進行中的繪圖
+      if (drawControl._toolbars.draw) {
+        Object.values(drawControl._toolbars.draw._modes).forEach(mode => {
+          if (mode.handler._enabled) {
+            mode.handler.disable();
+          }
+        });
+      }
       map.removeControl(drawControl);
       drawBtn?.classList.remove('active');
       drawControlVisible = false;
