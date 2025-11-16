@@ -1132,15 +1132,6 @@ body.map-open #mapBtn {
 body.autoid-open #autoIdBtn {
   background-color: #007bff;
 }
-
-/* Flash Mode active state */
-body.flashmode-active #flashModeBtn {
-  background-color: #ffd700;
-}
-
-body.flashmode-active #flashModeBtn i {
-  color: black;
-}
 /* Time Expansion active state — same blue used for setting/map/autoid */
 body.timeexp-open #timeexpBtn {
   background-color: #007bff;

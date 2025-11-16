@@ -82,7 +82,7 @@ export function initFrequencyHover({
 
     const scrollLeft = viewer.scrollLeft || 0;
     const freq = (1 - y / spectrogramHeight) * (maxFrequency - minFrequency) + minFrequency;
-    const actualWidth = getDuration() * getZoomLevel();
+    const actualWidth = container.scrollWidth;
     const time = ((x + scrollLeft) / actualWidth) * getDuration();
 
     hoverLine.style.top = `${y}px`;

@@ -3,7 +3,6 @@ initWavesurfer,
 getWavesurfer,
 getPlugin,
 replacePlugin,
-setSpectrogramModule,
 createSpectrogramPlugin,
 getCurrentColorMap,
 initScrollSync,
@@ -25,7 +24,6 @@ import { initDropdown } from './modules/dropdown.js';
 import { showMessageBox } from './modules/messageBox.js';
 import { initAutoIdPanel } from './modules/autoIdPanel.js';
 import { initFreqContextMenu } from './modules/freqContextMenu.js';
-import { initFlashMode, isFlashModeEnabled } from './modules/flashMode.js';
 import { getCurrentIndex, getFileList, toggleFileIcon, setFileList, clearFileList, getFileIconState, getFileNote, setFileNote, getFileMetadata, setFileMetadata, clearTrashFiles, getTrashFileCount, getCurrentFile, getTimeExpansionMode, setTimeExpansionMode, toggleTimeExpansionMode } from './modules/fileState.js';
 
 const spectrogramHeight = 800;
@@ -427,7 +425,6 @@ sidebarElem.addEventListener('sidebar-toggle', () => {
   }, 310);
 });
 const tagControl = initTagControl();
-initFlashMode();
 
 (async () => {
   demoFetchController = new AbortController();
@@ -615,24 +612,6 @@ const zoomControl = initZoomControls(
     freqHoverControl?.refreshHover();
     autoIdControl?.updateMarkers();
     updateSpectrogramSettingsText();
-    // Redraw spectrogram with new overlap size after zoom
-    // When in auto mode, calculate the actual overlap percent based on new canvas width
-    const overlapValue = currentOverlap === 'auto'
-      ? getAutoOverlapPercent()
-      : getOverlapPercent();
-    // 在重繪前設置正確的 Spectrogram 模塊（根據 Flash mode ON/OFF）
-    setSpectrogramModule(isFlashModeEnabled());
-    replacePlugin(
-      getCurrentColorMap(),
-      spectrogramHeight,
-      currentFreqMin,
-      currentFreqMax,
-      overlapValue,
-      () => {
-        freqHoverControl?.refreshHover();
-        autoIdControl?.updateMarkers();
-      }
-    );
   },
   () => selectionExpandMode,
   () => {
@@ -691,24 +670,7 @@ viewer.addEventListener('expand-selection', async (e) => {
     const blob = await cropWavBlob(base, startTime, endTime);
     if (blob) {
       expandHistory.push({ src: base, freqMin: currentFreqMin, freqMax: currentFreqMax });
-      
-      // Wait for loadBlob to complete (including decode and decodedData population)
-      const ws = getWavesurfer();
-      await ws.loadBlob(blob);
-      
-      // Ensure decodedData is available for getAutoOverlapPercent() calculation
-      await new Promise(resolve => {
-        if (ws.getDecodedData?.()) {
-          resolve();
-        } else {
-          const onDecode = () => {
-            ws.un?.('decode', onDecode);
-            resolve();
-          };
-          ws.on?.('decode', onDecode);
-        }
-      });
-      
+      await getWavesurfer().loadBlob(blob);
       currentExpandBlob = blob;
       selectionExpandMode = true;
       zoomControl.resetZoomState();  // ✅ 使用完整重置
@@ -738,24 +700,7 @@ viewer.addEventListener('fit-window-selection', async (e) => {
     const blob = await cropWavBlob(base, startTime, endTime);
     if (blob) {
       expandHistory.push({ src: base, freqMin: currentFreqMin, freqMax: currentFreqMax });
-      
-      // Wait for loadBlob to complete (including decode and decodedData population)
-      const ws = getWavesurfer();
-      await ws.loadBlob(blob);
-      
-      // Ensure decodedData is available for getAutoOverlapPercent() calculation
-      await new Promise(resolve => {
-        if (ws.getDecodedData?.()) {
-          resolve();
-        } else {
-          const onDecode = () => {
-            ws.un?.('decode', onDecode);
-            resolve();
-          };
-          ws.on?.('decode', onDecode);
-        }
-      });
-      
+      await getWavesurfer().loadBlob(blob);
       currentExpandBlob = blob;
       selectionExpandMode = true;
       zoomControl.resetZoomState();  // ✅ 使用完整重置
@@ -1036,11 +981,7 @@ function getOverlapPercent() {
 }
 
 function getAutoOverlapPercent() {
-  // Prefer the currently loaded WaveSurfer decodedData length (e.g. cropped blob
-  // in selection expansion mode). Fall back to `currentAudioBufferLength`
-  // which represents the original file buffer length.
-  const decodedData = getWavesurfer()?.getDecodedData?.();
-  const bufferLength = decodedData?.length || currentAudioBufferLength;
+  const bufferLength = currentAudioBufferLength || getWavesurfer()?.backend?.buffer?.length;
   const canvasWidth = document
     .querySelector('#spectrogram-only canvas')
     ?.width || container.clientWidth;
