@@ -810,6 +810,13 @@ getWavesurfer().on('ready', () => {
 getWavesurfer().on('decode', () => {
   duration = getWavesurfer().getDuration();
   
+  // Update currentAudioBufferLength to reflect the newly decoded buffer
+  // This is important for selection expansion mode to calculate correct auto overlap
+  const bufLen = getWavesurfer()?.backend?.buffer?.length;
+  if (bufLen) {
+    currentAudioBufferLength = bufLen;
+  }
+  
   // ✅ 強制重置所有寬度，確保不受先前 zoom 影響
   container.style.width = '100%';
   wrapper.style.width = '100%';
