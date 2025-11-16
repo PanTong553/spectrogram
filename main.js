@@ -981,7 +981,12 @@ function getOverlapPercent() {
 }
 
 function getAutoOverlapPercent() {
-  const bufferLength = currentAudioBufferLength || getWavesurfer()?.backend?.buffer?.length;
+  // When in selection expansion mode, prefer the currently loaded
+  // wavesurfer backend buffer (which holds the cropped selection) so the
+  // auto overlap reflects the selection spectrogram rather than the
+  // original wav file length stored in `currentAudioBufferLength`.
+  const backendBufLen = getWavesurfer()?.backend?.buffer?.length;
+  const bufferLength = (selectionExpandMode ? backendBufLen : null) || currentAudioBufferLength || backendBufLen;
   const canvasWidth = document
     .querySelector('#spectrogram-only canvas')
     ?.width || container.clientWidth;
