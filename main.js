@@ -66,7 +66,6 @@ const fftSizeBtn = document.getElementById('fftSizeInput');
 let selectionExpandMode = false;
 let expandHistory = [];
 let currentExpandBlob = null;
-let pendingExpansionData = null; // ✅ 用來儲存待處理的 expansion 數據
 // When true, prevent applySampleRate from auto-adjusting the displayed
 // freqMin/freqMax input values. Used when reloading the file due to
 // UI-only actions (e.g. toggling Time Expansion) where we don't want to
@@ -671,10 +670,24 @@ viewer.addEventListener('expand-selection', async (e) => {
     const blob = await cropWavBlob(base, startTime, endTime);
     if (blob) {
       expandHistory.push({ src: base, freqMin: currentFreqMin, freqMax: currentFreqMax });
-      currentExpandBlob = blob;
-      // ✅ 儲存待處理的 expansion 數據
-      pendingExpansionData = { type: 'expand' };
       await getWavesurfer().loadBlob(blob);
+      currentExpandBlob = blob;
+      selectionExpandMode = true;
+      zoomControl.resetZoomState();  // ✅ 使用完整重置
+      
+      // ✅ 強制重置 container 寬度
+      container.style.width = '100%';
+      
+      sampleRateBtn.disabled = true;
+      renderAxes();
+      freqHoverControl?.hideHover();
+      freqHoverControl?.clearSelections();
+      updateExpandBackBtn();
+      autoIdControl?.reset();
+      updateSpectrogramSettingsText();
+      // 強制解除 suppressHover/isOverBtnGroup 狀態
+      viewer.dispatchEvent(new CustomEvent('force-hover-enable'));
+      freqHoverControl?.refreshHover();
     }
   }
 });
@@ -687,10 +700,23 @@ viewer.addEventListener('fit-window-selection', async (e) => {
     const blob = await cropWavBlob(base, startTime, endTime);
     if (blob) {
       expandHistory.push({ src: base, freqMin: currentFreqMin, freqMax: currentFreqMax });
-      currentExpandBlob = blob;
-      // ✅ 儲存待處理的 expansion 數據
-      pendingExpansionData = { type: 'fit-window', Flow, Fhigh };
       await getWavesurfer().loadBlob(blob);
+      currentExpandBlob = blob;
+      selectionExpandMode = true;
+      zoomControl.resetZoomState();  // ✅ 使用完整重置
+      
+      // ✅ 強制重置 container 寬度
+      container.style.width = '100%';
+      
+      sampleRateBtn.disabled = true;
+      freqMinInput.value = formatFreqValue(Flow);
+      freqMaxInput.value = formatFreqValue(Fhigh);
+      updateFrequencyRange(Flow, Fhigh);
+      freqHoverControl?.hideHover();
+      freqHoverControl?.clearSelections();
+      updateExpandBackBtn();
+      autoIdControl?.reset();
+      updateSpectrogramSettingsText();
     }
   }
 });
@@ -1315,24 +1341,13 @@ document.addEventListener("file-loaded", async () => {
   hideStopButton();
   updateProgressLine(0);
   lastLoadedFileName = currentFile ? currentFile.name : null;
-  
-  // ✅ 检查是否有待处理的 expansion 数据（来自 expand-selection 或 fit-window-selection）
-  const isExpanding = pendingExpansionData !== null;
-  
-  if (!isExpanding) {
-    selectionExpandMode = false;
-    expandHistory = [];
-    currentExpandBlob = null;
-  }
-  
-  sampleRateBtn.disabled = quickPresetActive || isExpanding ? true : false;
-  fftSizeBtn.disabled = quickPresetActive || isExpanding ? true : false;
-  
-  if (!isExpanding) {
-    updateExpandBackBtn();
-  }
+  selectionExpandMode = false;
+  sampleRateBtn.disabled = quickPresetActive ? true : false;
+  fftSizeBtn.disabled = quickPresetActive ? true : false;
+  expandHistory = [];
+  currentExpandBlob = null;
+  updateExpandBackBtn();
   autoIdControl?.reset();
-  
   if (currentFile) {
     const arrayBuf = await currentFile.arrayBuffer();
     const ac = new (window.AudioContext || window.webkitAudioContext)();
@@ -1342,30 +1357,7 @@ document.addEventListener("file-loaded", async () => {
       ? getAutoOverlapPercent()
       : getOverlapPercent();
     specWorker.postMessage({ type: "render", buffer: audioBuf.getChannelData(0), sampleRate: audioBuf.sampleRate, fftSize: currentFftSize, overlap: workerOverlap }, [audioBuf.getChannelData(0).buffer]);
-    
-    // ✅ 处理待处理的 expansion 数据
-    if (isExpanding) {
-      const expData = pendingExpansionData;
-      pendingExpansionData = null;
-      
-      selectionExpandMode = true;
-      renderAxes();
-      freqHoverControl?.hideHover();
-      freqHoverControl?.clearSelections();
-      updateExpandBackBtn();
-      
-      if (expData.type === 'fit-window') {
-        freqMinInput.value = formatFreqValue(expData.Flow);
-        freqMaxInput.value = formatFreqValue(expData.Fhigh);
-        updateFrequencyRange(expData.Flow, expData.Fhigh);
-      }
-      
-      updateSpectrogramSettingsText();
-      viewer.dispatchEvent(new CustomEvent('force-hover-enable'));
-      freqHoverControl?.refreshHover();
-    } else {
-      updateSpectrogramSettingsText();
-    }
+    updateSpectrogramSettingsText();
   }
 });
 
