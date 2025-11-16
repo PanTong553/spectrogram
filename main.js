@@ -684,7 +684,8 @@ viewer.addEventListener('expand-selection', async (e) => {
       freqHoverControl?.clearSelections();
       updateExpandBackBtn();
       autoIdControl?.reset();
-      updateSpectrogramSettingsText();
+      // ✅ 移除此處的 updateSpectrogramSettingsText()，讓 decode 事件處理器負責
+      // updateSpectrogramSettingsText();
       // 強制解除 suppressHover/isOverBtnGroup 狀態
       viewer.dispatchEvent(new CustomEvent('force-hover-enable'));
       freqHoverControl?.refreshHover();
@@ -716,7 +717,8 @@ viewer.addEventListener('fit-window-selection', async (e) => {
       freqHoverControl?.clearSelections();
       updateExpandBackBtn();
       autoIdControl?.reset();
-      updateSpectrogramSettingsText();
+      // ✅ 移除此處的 updateSpectrogramSettingsText()，讓 decode 事件處理器負責
+      // updateSpectrogramSettingsText();
     }
   }
 });
@@ -809,6 +811,14 @@ getWavesurfer().on('ready', () => {
 
 getWavesurfer().on('decode', () => {
   duration = getWavesurfer().getDuration();
+  
+  // ✅ 在 selection expansion mode 時，從 wavesurfer backend 獲取新的 buffer 長度
+  if (selectionExpandMode) {
+    const newBufferLength = getWavesurfer()?.backend?.buffer?.length;
+    if (newBufferLength) {
+      currentAudioBufferLength = newBufferLength;
+    }
+  }
   
   // ✅ 強制重置所有寬度，確保不受先前 zoom 影響
   container.style.width = '100%';
@@ -980,8 +990,11 @@ function getOverlapPercent() {
   return isNaN(parsed) ? null : parsed;
 }
 
-function getAutoOverlapPercent() {
-  const bufferLength = currentAudioBufferLength || getWavesurfer()?.backend?.buffer?.length;
+function getAutoOverlapPercent(overriddenBufferLength = null) {
+  // 優先使用傳入的 bufferLength，其次是 currentAudioBufferLength，最後回退到 wavesurfer backend
+  const bufferLength = overriddenBufferLength !== null
+    ? overriddenBufferLength
+    : (currentAudioBufferLength || getWavesurfer()?.backend?.buffer?.length);
   const canvasWidth = document
     .querySelector('#spectrogram-only canvas')
     ?.width || container.clientWidth;
