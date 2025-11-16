@@ -3,6 +3,7 @@ initWavesurfer,
 getWavesurfer,
 getPlugin,
 replacePlugin,
+setSpectrogramModule,
 createSpectrogramPlugin,
 getCurrentColorMap,
 initScrollSync,
@@ -24,7 +25,7 @@ import { initDropdown } from './modules/dropdown.js';
 import { showMessageBox } from './modules/messageBox.js';
 import { initAutoIdPanel } from './modules/autoIdPanel.js';
 import { initFreqContextMenu } from './modules/freqContextMenu.js';
-import { initFlashMode } from './modules/flashMode.js';
+import { initFlashMode, isFlashModeEnabled } from './modules/flashMode.js';
 import { getCurrentIndex, getFileList, toggleFileIcon, setFileList, clearFileList, getFileIconState, getFileNote, setFileNote, getFileMetadata, setFileMetadata, clearTrashFiles, getTrashFileCount, getCurrentFile, getTimeExpansionMode, setTimeExpansionMode, toggleTimeExpansionMode } from './modules/fileState.js';
 
 const spectrogramHeight = 800;
@@ -619,6 +620,8 @@ const zoomControl = initZoomControls(
     const overlapValue = currentOverlap === 'auto'
       ? getAutoOverlapPercent()
       : getOverlapPercent();
+    // 在重繪前設置正確的 Spectrogram 模塊（根據 Flash mode ON/OFF）
+    setSpectrogramModule(isFlashModeEnabled());
     replacePlugin(
       getCurrentColorMap(),
       spectrogramHeight,
