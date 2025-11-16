@@ -51,7 +51,8 @@
         <pre id="guano-output">(no file selected)</pre>
       </div>
   </div>
-  <div id="mainarea">  
+    <div id="mainarea">  
+
     <div id="control-bar">
       <!-- Top Bar -->
       <div id="top-bar">
@@ -75,9 +76,13 @@
         <button id="exportBtn" title="Export" class="sidebar-button"><i class="fa-solid fa-file-export"></i></button>
         <button id="mapBtn" title="Map (Ctrl+M)" class="sidebar-button"><i class="fa-solid fa-map-location-dot"></i></button>
         <button id="setting" title="Spectrogram setting (Ctrl+S)" class="sidebar-button"><i class="fa-solid fa-sliders"></i></button>
+        <button id="flashModeBtn" title="Flash Mode - Optimized Spectrogram (Ctrl+F)" class="sidebar-button"><i class="fa-solid fa-bolt"></i></button>
         <button id="expandBackBtn" title="Back to previous session (Backspace)" class="sidebar-button">
           <i class="fa-solid fa-reply"></i>
           <span id="expandBackCount" class="expand-back-count"></span>
+        </button>
+        <button id="timeexpBtn" class="sidebar-button" title="10x Time Expansion">
+          <i class="fa-solid fa-clock-rotate-left"></i>
         </button>
       </div>
       <!-- Tool Bar -->    
@@ -89,7 +94,7 @@
           <button id="sampleRateInput" class="dropdown-button" title="Sampling rate (kHz)">256</button>
         </label>
         <label class="slider-label">FFT
-          <button id="fftSizeInput" class="dropdown-button" title="FFT Size">1024</button>
+          <button id="fftSizeInput" class="dropdown-button" title="FFT Size">512</button>
         </label>
         <label class="slider-label">Overlap
           <input type="number" id="overlapInput" title="Overlap Size (1-99)" placeholder="Auto" min="1" max="99" step="1">
@@ -273,6 +278,7 @@
         <canvas id="color-bar" width="600" height="20"></canvas>
       </div>
       <div class="viewer-row">
+        <div id="selection-time-info"></div>
         <div id="freq-axis-wrapper">
           <div id="freq-label">Frequency (kHz)</div>
           <div id="freq-axis"></div>

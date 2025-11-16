@@ -6,44 +6,53 @@ export function drawTimeAxis({
   zoomLevel,
   axisElement,
   labelElement,
+  timeExpansion = false,
 }) {
   const pxPerSec = zoomLevel;
   const totalWidth = duration * pxPerSec;
-
-  const offsetX = 65; // ✅ 預留 freq label 寬度
 
   let step = 1000;
   if (pxPerSec >= 800) step = 100;
   else if (pxPerSec >= 500) step = 200;
   else if (pxPerSec >= 300) step = 500;
 
-  const html = [];
+  // 使用 DocumentFragment 批量插入 DOM，減少重排
+  const fragment = document.createDocumentFragment();
+  
   for (let t = 0; t < duration * 1000; t += step) {
     const left = (t / 1000) * pxPerSec;
 
     // 主刻度線
-    html.push(`
-      <div class="time-major-tick" style="left:${left}px"></div>
-    `);
+    const majorTick = document.createElement('div');
+    majorTick.className = 'time-major-tick';
+    majorTick.style.left = `${left}px`;
+    fragment.appendChild(majorTick);
 
-    // 副刻度線 (在主刻度與下一個主刻度之間的中間位置)
+    // 副刻度線
     const midLeft = left + (step / 1000 / 2) * pxPerSec;
     if (midLeft <= totalWidth) {
-      html.push(`
-        <div class="time-minor-tick" style="left:${midLeft}px"></div>
-      `);
+      const minorTick = document.createElement('div');
+      minorTick.className = 'time-minor-tick';
+      minorTick.style.left = `${midLeft}px`;
+      fragment.appendChild(minorTick);
     }
 
-    // 置中數字
-    const label = step >= 1000 ? `${(t / 1000)}` : `${t}`;
-    const isZero = label === '0';
-    const extraClass = isZero ? ' zero-label' : '';
-    html.push(`
-      <span class="time-axis-label${extraClass}" style="left:${left}px">${label}</span>
-    `);
+    // 時間標籤
+    const baseLabel = step >= 1000 ? (t / 1000) : t;
+    const displayLabel = timeExpansion ? (baseLabel / 10) : baseLabel;
+    const labelStr = (step >= 1000 && !timeExpansion) ? `${baseLabel}` : `${displayLabel}`;
+    
+    const label = document.createElement('span');
+    label.className = 'time-axis-label';
+    if (Number(displayLabel) === 0) label.classList.add('zero-label');
+    label.style.left = `${left}px`;
+    label.textContent = labelStr;
+    fragment.appendChild(label);
   }
 
-  axisElement.innerHTML = html.join('');
+  // 一次性更新 DOM
+  axisElement.innerHTML = '';
+  axisElement.appendChild(fragment);
   axisElement.style.width = `${totalWidth}px`;
   labelElement.textContent = step >= 1000 ? 'Time (s)' : 'Time (ms)';
 }
@@ -55,6 +64,7 @@ export function drawFrequencyGrid({
   spectrogramHeight = 800,
   maxFrequency = 128,
   offsetKHz = 0,
+  timeExpansion = false,
 }) {
   const width = containerElement.scrollWidth;
   gridCanvas.width = width;
@@ -67,20 +77,23 @@ export function drawFrequencyGrid({
   ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
   ctx.lineWidth = 0.4;
 
-  const majorStep = 10;
-  const minorStep = 5;
   const range = maxFrequency;
+  const majorStep = timeExpansion ? 1 : 10;
+  const minorStep = timeExpansion ? 0.5 : 5;
 
+  // 優化：批量繪製所有網格線
+  ctx.beginPath();
   for (let f = 0; f <= range; f += majorStep) {
     const y = (1 - f / range) * spectrogramHeight;
-    ctx.beginPath();
     ctx.moveTo(0, y);
     ctx.lineTo(width, y);
-    ctx.stroke();
   }
+  ctx.stroke();
 
-  labelContainer.innerHTML = '';
-
+  // 使用 DocumentFragment 批量操作 DOM
+  const fragment = document.createDocumentFragment();
+  
+  // 繪製主刻度和標籤
   for (let f = 0; f <= range; f += majorStep) {
     const y = Math.round((1 - f / range) * spectrogramHeight);
 
@@ -88,26 +101,32 @@ export function drawFrequencyGrid({
     const tick = document.createElement('div');
     tick.className = 'freq-major-tick';
     tick.style.top = `${y}px`;
-    labelContainer.appendChild(tick);
+    fragment.appendChild(tick);
 
-    // 文字
+    // 文字標籤
     const label = document.createElement('div');
     label.className = 'freq-label-static freq-axis-label';
     label.style.top = `${y - 1}px`;
     const freqValue = f + offsetKHz;
-    label.textContent = Number(freqValue.toFixed(1)).toString();
-    labelContainer.appendChild(label);
+    const displayValue = timeExpansion ? (freqValue * 10) : freqValue;
+    label.textContent = Number(displayValue.toFixed(1)).toString();
+    fragment.appendChild(label);
   }
 
-  // 新增次刻度 (minor tick)
-  for (let f = 0; f <= range; f += minorStep) {
-    if (f % majorStep === 0) continue;
+  // 繪製次刻度
+  for (let f = minorStep; f <= range; f += minorStep) {
+    // 跳過與主刻度位置重合的位置
+    if (Math.abs((f / majorStep) - Math.round(f / majorStep)) < 1e-6) continue;
 
     const y = Math.round((1 - f / range) * spectrogramHeight);
 
     const minorTick = document.createElement('div');
     minorTick.className = 'freq-minor-tick';
     minorTick.style.top = `${y}px`;
-    labelContainer.appendChild(minorTick);
+    fragment.appendChild(minorTick);
   }
+
+  // 一次性更新 DOM
+  labelContainer.innerHTML = '';
+  labelContainer.appendChild(fragment);
 }

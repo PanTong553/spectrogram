@@ -2,7 +2,7 @@
 
 import { extractGuanoMetadata, parseGuanoMetadata } from './guanoReader.js';
 import { getWavSampleRate, getWavDuration } from './fileLoader.js';
-import { addFilesToList, removeFilesByName, setFileMetadata, getCurrentIndex, getFileList } from './fileState.js';
+import { addFilesToList, removeFilesByName, setFileMetadata, getCurrentIndex, getFileList, getTimeExpansionMode } from './fileState.js';
 import { showMessageBox } from './messageBox.js';
 import { importKmlFile } from './mapPopup.js';
 
@@ -142,7 +142,9 @@ export function initDragDropLoader({
       const dur = await getWavDuration(fileItem);
       if (fileItem.size < 200 * 1024) {
         skippedSmall++;
-      } else if (dur > 20) {
+      } else if (dur > 20 && !getTimeExpansionMode()) {
+        // normally skip files longer than 20s, but allow when Time Expansion
+        // mode is active (user requested 10x time expansion)
         skippedLong++;
       } else {
         filteredList.push(fileItem);

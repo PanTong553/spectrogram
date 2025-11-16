@@ -1,6 +1,12 @@
 import { getCurrentIndex, getFileMetadata, getFileList, getFileIconState } from './fileState.js';
+import { showMessageBox } from './messageBox.js';
+import { Dropdown } from './dropdown.js';
+import MarkerClusteringManager from './markerClusteringManager.js';
 
 let importKmlFileFn = null;
+let clusterManager = null;
+let surveyPointsDataPending = false; // Track if survey points data needs to be loaded
+let surveyPointsLoaded = false; // Track if survey points have been successfully loaded
 
 export function initMapPopup({
   buttonId = 'mapBtn',
@@ -54,13 +60,15 @@ export function initMapPopup({
   }
   let popupWidth = parseInt(localStorage.getItem('mapPopupWidth'), 10);
   let popupHeight = parseInt(localStorage.getItem('mapPopupHeight'), 10);
-  if (isNaN(popupWidth) || popupWidth <= 0) popupWidth = 500;
-  if (isNaN(popupHeight) || popupHeight <= 0) popupHeight = 500;
+  if (isNaN(popupWidth) || popupWidth <= 0) popupWidth = 600;
+  if (isNaN(popupHeight) || popupHeight <= 0) popupHeight = 600;
   popup.style.width = `${popupWidth}px`;
   popup.style.height = `${popupHeight}px`;
 
   let map = null;
   let markers = [];
+  // track survey markers whose tooltip was pinned (should remain visible)
+  let pinnedSurveyMarkers = new Set();
   let polylines = [];
   let routeBtn = null;
   let routeToggleBtn = null;
@@ -70,6 +78,7 @@ export function initMapPopup({
   let clearKmlBtn = null;
   let drawBtn = null;
   let textBtn = null;
+  let professionalBtn = null;
   let exportBtn = null;
   let textMode = false;
   let textMarkers = [];
@@ -80,6 +89,214 @@ export function initMapPopup({
   let drawControlVisible = false;
   let layersControl = null;
   let hkgridLayer = null;
+  // overlays handling (moved to outer scope so togglePopup can access)
+  let overlaysPending = []; // { layer, name }
+  let overlaysLoaded = false; // whether overlays have been added to layersControl
+  let overlaysPromptShown = false; // whether we already showed the password prompt (only show once)
+  const HASHED_PASSWORD = '8e81149cfda80214b01f32e8e96ede43ee9c42b797e7af1c5c979429622ce40c';
+
+  function loadOverlays() {
+    if (overlaysLoaded) return;
+    overlaysPending.forEach(({ layer, name }) => {
+      try {
+        layersControl.addOverlay(layer, name);
+      } catch (e) {
+        // ignore
+      }
+    });
+    overlaysPending = [];
+    overlaysLoaded = true;
+    // hide professional control if present
+    try {
+      if (professionalBtn?.parentElement) {
+        professionalBtn.parentElement.style.display = 'none';
+      }
+    } catch (e) {}
+    // Load survey points data after password is verified
+    if (!surveyPointsLoaded && !surveyPointsDataPending) {
+      loadSurveyPointsData();
+    }
+  }
+
+  // Load survey points data from remote source
+  function loadSurveyPointsData() {
+    if (surveyPointsDataPending || surveyPointsLoaded) return;
+    surveyPointsDataPending = true;
+    
+    fetch("https://opensheet.elk.sh/1Al_sWwiIU6DtQv6sMFvXb9wBUbBiE-zcYk8vEwV82x8/sheet3")
+      .then(r => r.json())
+      .then(points => {
+        // Initialize clustering manager if not already done
+        if (!clusterManager) {
+          clusterManager = new MarkerClusteringManager(map, {
+            maxVisibleMarkers: 500,
+            enableAnimation: true,
+            animationDuration: 300,
+          });
+        }
+
+        // Format data for clustering system
+        const formattedPoints = points
+          .filter(pt => {
+            const lat = parseFloat(pt.Latitude);
+            const lon = parseFloat(pt.Longitude);
+            return !isNaN(lat) && !isNaN(lon);
+          })
+          .map((pt, idx) => ({
+            id: `survey_${idx}`,
+            lat: parseFloat(pt.Latitude),
+            lng: parseFloat(pt.Longitude),
+            location: pt.Location,
+          }));
+
+        // Set survey points in clustering manager
+        clusterManager.setSurveyPoints(formattedPoints);
+        
+        // Add single Survey point overlay that dynamically shows clusters or markers based on zoom
+        try {
+          // Create a combined layer group that will be managed dynamically
+          const surveyPointLayer = L.layerGroup();
+          
+          if (layersControl) {
+            layersControl.addOverlay(surveyPointLayer, 'Survey point');
+          }
+          
+          // Function to update layer visibility based on zoom level
+          const updateSurveyPointLayers = () => {
+            if (!map.hasLayer(surveyPointLayer)) return; // Only update if overlay is checked
+            
+            const clusterLayerGroup = clusterManager.getClusterLayerGroup();
+            const markerLayerGroup = clusterManager.getMarkerLayerGroup();
+            
+            // 在清除前，保存 pinned markers 資訊
+            const pinnedMarkersData = [];
+            surveyPointLayer.eachLayer(layer => {
+              if (layer._tooltipPinned && layer._pinnedIsPopup) {
+                pinnedMarkersData.push({
+                  id: layer._surveyPointData?.id,
+                  shouldReopen: true
+                });
+              }
+            });
+            
+            surveyPointLayer.clearLayers();
+            
+            const isClustered = clusterManager.isClustered;
+            
+            console.log(`[MapPopup] updateSurveyPointLayers: isClustered=${isClustered}, clusters=${clusterManager.currentClusters?.length || 0}, visibleMarkers=${clusterManager.currentVisibleMarkers?.length || 0}`);
+            
+            if (isClustered && clusterLayerGroup) {
+              clusterLayerGroup.eachLayer(layer => {
+                surveyPointLayer.addLayer(layer);
+              });
+            } else if (!isClustered && markerLayerGroup) {
+              markerLayerGroup.eachLayer(layer => {
+                surveyPointLayer.addLayer(layer);
+              });
+            }
+            
+            // Sync pinned markers from clusterManager after layers are updated
+            if (clusterManager.getPinnedMarkers) {
+              pinnedSurveyMarkers = clusterManager.getPinnedMarkers();
+              // 重新打開所有 pinned popups（因為層重新添加時 popup 會被關閉）
+              setTimeout(() => {
+                pinnedSurveyMarkers.forEach(m => {
+                  try {
+                    if (m?._tooltipPinned && m._pinnedIsPopup) {
+                      m.openPopup();
+                    }
+                  } catch (e) {}
+                });
+              }, 20);
+            }
+          };
+          
+          // Listen to map events to update layers dynamically
+          map.on('zoomend', updateSurveyPointLayers);
+          map.on('moveend', updateSurveyPointLayers);
+          
+          // Listen to overlay toggle
+          map.on('overlayadd', (e) => {
+            if (e.name === 'Survey point') {
+              updateSurveyPointLayers();
+            }
+          });
+          
+          // Store reference for later use
+          clusterManager.surveyPointLayer = surveyPointLayer;
+          clusterManager.updateSurveyPointLayers = updateSurveyPointLayers;
+        } catch (e) {
+          console.error('[MapPopup] Error adding survey point overlay:', e);
+        }
+        
+        surveyPointsLoaded = true;
+        surveyPointsDataPending = false;
+        console.log('[MapPopup] Survey points loaded successfully');
+      })
+      .catch(err => {
+        console.error('[MapPopup] Error loading survey points:', err);
+        surveyPointsDataPending = false;
+      });
+  }
+
+  async function computeSHA256Hex(text) {
+    try {
+      const enc = new TextEncoder().encode(text);
+      const buf = await crypto.subtle.digest('SHA-256', enc);
+      const hex = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      return hex;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Deprecated automatic prompt. We won't auto-prompt when popup opens.
+  function promptForPasswordIfNeeded() {
+    // intentionally no-op to prevent automatic popup on map open
+  }
+
+  // Show professional password prompt on-demand (triggered by the Professional button)
+  async function showProfessionalPrompt() {
+    try {
+      overlaysPromptShown = true;
+      const showPasswordPrompt = () => {
+        showMessageBox({
+          title: 'Professional option',
+          message: 'To access more layers, please enter password.',
+          confirmText: 'Confirm',
+          cancelText: 'Cancel',
+          input: true,
+          inputType: 'password',
+          onConfirm: async (val) => {
+            const hex = await computeSHA256Hex(val || '');
+            if (hex && hex === HASHED_PASSWORD) {
+              loadOverlays();
+              // hide professional button if present
+              try {
+                if (professionalBtn) {
+                  const parent = professionalBtn.parentElement;
+                  if (parent) parent.style.display = 'none';
+                }
+              } catch (e) {}
+            } else {
+              showMessageBox({
+                message: 'Wrong password',
+                confirmText: 'OK',
+                onConfirm: () => {
+                  showPasswordPrompt();
+                }
+              });
+            }
+          },
+          onCancel: () => {
+          }
+        });
+      };
+      showPasswordPrompt();
+    } catch (e) {
+      // ignore
+    }
+  }
   const coordScaleWrapper = mapDiv.querySelector('.coord-scale-wrapper');
   const coordDisplay = mapDiv.querySelector('#coord-display');
   const noCoordMsg = mapDiv.querySelector('#no-coord-message');
@@ -87,6 +304,7 @@ export function initMapPopup({
   let copyMsgTimer = null;
   let scaleControl = null;
   let isMapDragging = false;
+  let isMapZooming = false; // Track if map is zooming
   let layersControlContainer = null;
   let zoomControlContainer = null;
   let routeToggleContainer = null;
@@ -101,8 +319,11 @@ export function initMapPopup({
   let dropCounter = 0;
 
   let ctrlPressed = false;
+  let markerPointerSuppressed = false; // 當拖動/縮放期間暫時抑制 marker tooltip
 
   function updateMarkerPointerEvents() {
+    // 如果被全域抑制（drag/zoom），則不要改變 pointerEvents
+    if (markerPointerSuppressed) return;
     const all = [...markers, ...textMarkers];
     all.forEach(m => {
       const el = m.getElement ? m.getElement() : m._icon;
@@ -201,11 +422,91 @@ export function initMapPopup({
 
   function createMap(lat, lon) {
     map = L.map(mapDiv).setView([lat, lon], 13);
+    // ensure pinned survey markers remain visible even if other clicks close tooltips/popups
+    map.on('click', () => {
+      try {
+        // 如果地圖正在被使用者拖曳，則不要自動重新開啟 pinned tooltip/popup
+        if (isMapDragging) return;
+        pinnedSurveyMarkers.forEach(m => {
+          try {
+            if (m?._tooltipPinned) {
+              if (m._pinnedIsPopup) m.openPopup(); else m.openTooltip();
+            }
+          } catch (e) {}
+        });
+      } catch (e) {}
+    });
+    // also listen for clicks outside the map (document) to re-open pinned displays
+    document.addEventListener('click', () => {
+      try {
+        // 如果使用者正在拖曳地圖，避免在全域點擊事件中重新開啟 pinned tooltip/popup
+        if (isMapDragging) return;
+        pinnedSurveyMarkers.forEach(m => {
+          try {
+            if (m?._tooltipPinned) {
+              if (m._pinnedIsPopup) m.openPopup(); else m.openTooltip();
+            }
+          } catch (e) {}
+        });
+      } catch (e) {}
+    });
+    // Protect pinned tooltips/popups: if Leaflet emits close events for pinned layers,
+    // immediately re-open them so they remain visible when other markers are clicked.
+    if (map && map.on) {
+      map.on('tooltipclose', (e) => {
+        try {
+          // 在使用者拖曳地圖時，不要強制重新開啟 tooltip（以免觸發自動平移）
+          if (isMapDragging) return;
+          const layer = e.layer || (e.tooltip && e.tooltip._source) || null;
+          if (layer && pinnedSurveyMarkers.has(layer) && layer._tooltipPinned && !layer._pinnedIsPopup) {
+            setTimeout(() => {
+              try { if (layer._tooltipPinned) layer.openTooltip(); } catch (err) {}
+            }, 0);
+          }
+        } catch (err) {}
+      });
+      map.on('popupclose', (e) => {
+        try {
+          // 在使用者拖曳或縮放地圖時，不要強制移除或重新開啟 popup
+          // 如果 popup 是 pinned，應該保持開啟直到用戶手動取消 pin
+          if (isMapDragging || isMapZooming) return;
+          const layer = e.layer || (e.popup && e.popup._source) || (e.popup && e.popup._source) || null;
+          if (layer && pinnedSurveyMarkers.has(layer) && layer._tooltipPinned && layer._pinnedIsPopup) {
+            // 如果是 pinned popup，重新開啟
+            setTimeout(() => {
+              try { if (layer._tooltipPinned) layer.openPopup(); } catch (err) {}
+            }, 0);
+          }
+        } catch (err) {}
+      });
+    }
+    // 當拖動或縮放時，不要顯示 marker 的 tooltip (全域抑制)
+    function setAllMarkersPointerEvents(enabled) {
+      try {
+        markerPointerSuppressed = enabled ? false : true;
+        // top-level markers & text markers
+        const all = [...markers, ...textMarkers];
+        all.forEach(m => {
+          const el = m.getElement ? m.getElement() : m._icon;
+          if (el) el.style.pointerEvents = enabled ? '' : 'none';
+        });
+        // surveyPointLayer (若存在)
+        if (typeof surveyPointLayer !== 'undefined' && surveyPointLayer && surveyPointLayer.eachLayer) {
+          surveyPointLayer.eachLayer(l => {
+            const el = l.getElement ? l.getElement() : l._icon;
+            if (el) el.style.pointerEvents = enabled ? '' : 'none';
+          });
+        }
+      } catch (e) {}
+    }
     map.createPane('annotationPane');
     map.getPane('annotationPane').style.zIndex = 650;
     zoomControlContainer = map.zoomControl.getContainer();
-    map.on('dragstart', () => { isMapDragging = true; updateCursor(); });
-    map.on('dragend', () => { isMapDragging = false; updateCursor(); });
+  map.on('dragstart', () => { isMapDragging = true; setAllMarkersPointerEvents(false); updateCursor(); });
+  map.on('dragend', () => { isMapDragging = false; setAllMarkersPointerEvents(true); updateCursor(); });
+  // 當使用者開始/結束縮放時也暫時設置標誌以保護 pinned popups
+  map.on('zoomstart', () => { isMapZooming = true; setAllMarkersPointerEvents(false); });
+  map.on('zoomend', () => { isMapZooming = false; setAllMarkersPointerEvents(true); });
     updateCursor();
     scaleControl = L.control.scale({
       position: 'bottomleft',
@@ -280,15 +581,25 @@ export function initMapPopup({
     );
 
     const hkVectorLabel = L.tileLayer(
-      'https://mapapi.geodata.gov.hk/gs/api/v1.0.0/xyz/label/hk/tc/wgs84/{z}/{x}/{y}.png',
+      'https://mapapi.geodata.gov.hk/gs/api/v1.0.0/xyz/label/hk/en/wgs84/{z}/{x}/{y}.png',
       { attribution: false, maxZoom: 20, minZoom: 0, crossOrigin: 'anonymous' }
     );
 
     // separate label layer is required for the imagery group so that
     // changing basemaps does not inadvertently remove the shared label layer
     const hkImageryLabel = L.tileLayer(
-      'https://mapapi.geodata.gov.hk/gs/api/v1.0.0/xyz/label/hk/tc/wgs84/{z}/{x}/{y}.png',
+      'https://mapapi.geodata.gov.hk/gs/api/v1.0.0/xyz/label/hk/en/wgs84/{z}/{x}/{y}.png',
       { attribution: false, maxZoom: 20, minZoom: 0, crossOrigin: 'anonymous' }
+    );
+
+
+    // Google Terrain
+    const googleTerrain = L.tileLayer(
+      'https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}',
+      {
+        attribution: 'Map data ©2025 Google',
+        crossOrigin: 'anonymous'
+      }
     );
 
     const hkVectorGroup = L.layerGroup([hkVectorBase, hkVectorLabel]);
@@ -308,15 +619,16 @@ export function initMapPopup({
       'Carto Dark': cartoDark,
       'Google Streets': googleStreets,
       'Google Satellite': googleSatellite,
-      'Google Hybrid': googleHybrid,
-      'HK Vector': hkVectorGroup,
-      'HK Imagery': hkImageryGroup,
+  'Google Hybrid': googleHybrid,
+  'Google Terrain': googleTerrain,
+  'HK Vector': hkVectorGroup,
+  'HK Imagery': hkImageryGroup,
     };
 
     layersControl = L.control.layers(baseLayers, null, { position: 'topright' }).addTo(map);
     layersControlContainer = layersControl.getContainer();
 
-    fetch("https://raw.githubusercontent.com/PanTong55/spectrogram/main/hkgrid.geojson")
+    fetch("https://raw.githubusercontent.com/hkbatradar/SonoRadar/main/hkgrid.geojson")
       .then((r) => r.json())
       .then((hkgriddata) => {
         hkgridLayer = L.geoJSON(hkgriddata, {
@@ -328,7 +640,10 @@ export function initMapPopup({
             fillOpacity: 0,
           },
         });
-        layersControl.addOverlay(hkgridLayer, '1km Grid');
+        // postpone adding overlay to control until authorized
+        overlaysPending.push({ layer: hkgridLayer, name: '1km Grid' });
+        // if popup is already open, prompt now
+        promptForPasswordIfNeeded();
       });
 
     drawnItems = new L.FeatureGroup().addTo(map);
@@ -477,8 +792,42 @@ export function initMapPopup({
         return container;
       }
     });
+
+    // Professional control (placed after Draw control)
+    const ProfessionalControl = L.Control.extend({
+      options: { position: 'topleft' },
+      onAdd() {
+        const container = L.DomUtil.create('div', 'leaflet-bar leaflet-professional-control');
+        container.style.setProperty('margin-top', '1px', 'important');
+        const link = L.DomUtil.create('a', '', container);
+        link.href = '#';
+        link.title = 'Professional';
+        link.innerHTML = '<i class="fa-solid fa-user-lock"></i>';
+        professionalBtn = link;
+        L.DomEvent.disableClickPropagation(container);
+        L.DomEvent.on(container, 'mousedown', L.DomEvent.stopPropagation);
+        L.DomEvent.on(container, 'dblclick', L.DomEvent.stopPropagation);
+        L.DomEvent.on(link, 'click', L.DomEvent.stop)
+          .on(link, 'mousedown', L.DomEvent.stopPropagation)
+          .on(link, 'dblclick', L.DomEvent.stopPropagation)
+          .on(link, 'click', () => {
+            try {
+              showProfessionalPrompt();
+            } catch (e) {}
+          });
+        // hide control immediately if overlays already loaded
+        if (overlaysLoaded) {
+          container.style.display = 'none';
+        }
+        return container;
+      }
+    });
     const drawToggle = new DrawToggleControl();
     map.addControl(drawToggle);
+    
+    // Add professional control right after draw control
+    const professionalToggle = new ProfessionalControl();
+    map.addControl(professionalToggle);
   }
 
   function refreshMarkers() {
@@ -796,12 +1145,71 @@ export function initMapPopup({
         editTextMarker(marker);
       }
     });
-    marker.on('contextmenu', () => {
-      if (textMode && !activeTextInput) {
-        map.removeLayer(marker);
-        textMarkers = textMarkers.filter(m => m !== marker);
-        updateMarkerPointerEvents();
-      }
+    marker.on('contextmenu', (evt) => {
+      // 使用 dropdown.js 顯示一個只有 "Remove" 的選單，按下後再刪除文字標記
+      if (!(textMode && !activeTextInput)) return;
+      try {
+        const orig = evt.originalEvent || evt.srcEvent || {};
+        orig.preventDefault?.();
+        orig.stopPropagation?.();
+      } catch (e) {}
+
+      // 建立一個臨時按鈕，Dropdown 會根據按鈕位置來定位選單
+      const btn = document.createElement('button');
+      btn.style.position = 'absolute';
+      btn.style.left = (evt.originalEvent?.clientX || 0) + 'px';
+      btn.style.top = (evt.originalEvent?.clientY || 0) + 'px';
+      btn.style.width = '1px';
+      btn.style.height = '1px';
+      btn.style.padding = '0';
+      btn.style.margin = '0';
+      btn.style.opacity = '0';
+      btn.style.zIndex = '2147483647';
+      btn.style.pointerEvents = 'auto';
+      document.body.appendChild(btn);
+
+      const items = [{ label: 'Remove', value: 'remove' }];
+      const dropdown = new Dropdown(btn, items, {
+        onChange: (val) => {
+          try {
+            if (val && (val.value === 'remove' || val.label === 'Remove')) {
+              map.removeLayer(marker);
+              textMarkers = textMarkers.filter(m => m !== marker);
+              updateMarkerPointerEvents();
+            }
+          } finally {
+            cleanup();
+          }
+        }
+      });
+
+      // 將選項文字顯示為紅色以表危險操作
+      try {
+        const first = dropdown.menu.querySelector('.dropdown-item');
+        if (first) first.style.color = 'red';
+      } catch (e) {}
+
+      // 當選單關閉時做清理（移除臨時按鈕與選單 DOM）
+      const cleanup = () => {
+        try {
+          if (dropdown && typeof dropdown.close === 'function') dropdown.close();
+        } catch (e) {}
+        try {
+          if (dropdown && dropdown.menu && dropdown.menu.parentNode) dropdown.menu.parentNode.removeChild(dropdown.menu);
+        } catch (e) {}
+        try { if (btn && btn.parentNode) btn.parentNode.removeChild(btn); } catch (e) {}
+      };
+
+      // 包裝 close 以確保一旦關閉就清理
+      try {
+        const origClose = dropdown.close.bind(dropdown);
+        dropdown.close = function() {
+          origClose();
+          cleanup();
+        };
+      } catch (e) {}
+
+      dropdown.open();
     });
     return marker;
   }
@@ -854,7 +1262,7 @@ export function initMapPopup({
     navigator.geolocation.getCurrentPosition((pos) => {
       const { latitude: lat, longitude: lon } = pos.coords;
       const icon = L.divIcon({
-        html: '<i class="fa-solid fa-location-pin"></i>',
+        html: '<i class="fa-solid fa-location-arrow"></i>',
         className: 'map-marker-device',
         iconSize: [28, 28],
         iconAnchor: [14, 28]
@@ -877,8 +1285,24 @@ export function initMapPopup({
     const idx = getCurrentIndex();
     if (idx < 0) {
       refreshMarkers();
-      showDeviceLocation();
       hideNoCoordMessage();
+      const list = getFileList();
+      const HK_BOUNDS = [[21.8, 113.8], [22.7, 114.5]]; // [southWestLat, southWestLng], [northEastLat, northEastLng]
+      const HK_CENTER = [22.28552, 114.15769]; // approximate center of Hong Kong
+
+      if (!map) {
+        createMap(HK_CENTER[0], HK_CENTER[1]);
+      }
+
+      if (!list || list.length === 0) {
+        try {
+          map.fitBounds(HK_BOUNDS);
+        } catch (e) {
+          map.setView(HK_CENTER, DEFAULT_ZOOM);
+        }
+      }
+
+      showDeviceLocation();	  
       return;
     }
     const meta = getFileMetadata(idx);
@@ -920,6 +1344,8 @@ export function initMapPopup({
       }
       updateMap();
       updateCursor();
+      // prompt if overlays are pending (handles case where fetch completed earlier or later)
+      promptForPasswordIfNeeded();
     }
   }
 
@@ -1001,6 +1427,10 @@ export function initMapPopup({
       if (exportControlContainer) exportControlContainer.style.display = 'none';
       if (coordScaleWrapper) coordScaleWrapper.style.display = 'none';
       if (textToggleContainer) textToggleContainer.style.setProperty('margin-top', '10px', 'important');
+      // Hide professional button in minimized state
+      if (professionalBtn?.parentElement) {
+        professionalBtn.parentElement.style.display = 'none';
+      }
       isMinimized = true;
       isMaximized = false; // 確保狀態正確
     } else {
@@ -1020,6 +1450,10 @@ export function initMapPopup({
       if (exportControlContainer) exportControlContainer.style.display = '';
       if (coordScaleWrapper) coordScaleWrapper.style.display = '';
       if (textToggleContainer) textToggleContainer.style.setProperty('margin-top', '1px', 'important');
+      // Show professional button only if overlays are not loaded yet
+      if (professionalBtn?.parentElement && !overlaysLoaded) {
+        professionalBtn.parentElement.style.display = '';
+      }
       isMinimized = false;
     }
     map?.invalidateSize();
@@ -1043,12 +1477,23 @@ export function initMapPopup({
   let isMinimized = false;
   
   // 儲存 Floating window 的最後狀態
+  // compute center defaults based on current popup size
+  const centerLeftDefault = Math.max(0, Math.floor((window.innerWidth - popupWidth) / 2));
+  const centerTopDefault = Math.max(0, Math.floor((window.innerHeight - popupHeight) / 2));
   let floatingState = {
-    width: parseInt(localStorage.getItem('mapFloatingWidth'), 10) || 500,
-    height: parseInt(localStorage.getItem('mapFloatingHeight'), 10) || 500,
-    left: parseInt(localStorage.getItem('mapFloatingLeft'), 10) || 100,
-    top: parseInt(localStorage.getItem('mapFloatingTop'), 10) || 100
+    width: parseInt(localStorage.getItem('mapFloatingWidth'), 10) || popupWidth,
+    height: parseInt(localStorage.getItem('mapFloatingHeight'), 10) || popupHeight,
+    left: parseInt(localStorage.getItem('mapFloatingLeft'), 10) || centerLeftDefault,
+    top: parseInt(localStorage.getItem('mapFloatingTop'), 10) || centerTopDefault
   };
+
+  // ensure popup initially positioned at center (or stored position)
+  try {
+    popup.style.left = `${floatingState.left}px`;
+    popup.style.top = `${floatingState.top}px`;
+  } catch (e) {
+    // ignore if popup not in DOM or styles cannot be set yet
+  }
 
   function disableUiPointerEvents() {
     if (viewer) {
@@ -1188,8 +1633,19 @@ export function initMapPopup({
   window.addEventListener('mousemove', (e) => {
     if (isMaximized) return;
     if (dragging) {
-      popup.style.left = `${e.clientX - offsetX}px`;
-      popup.style.top = `${e.clientY - offsetY}px`;
+      // 限制 popup 不超出視窗範圍
+      const popupWidth = popup.offsetWidth;
+      const popupHeight = popup.offsetHeight;
+      let newLeft = e.clientX - offsetX;
+      let newTop = e.clientY - offsetY;
+      // 限制 left/top 不小於 0
+      newLeft = Math.max(0, newLeft);
+      newTop = Math.max(0, newTop);
+      // 限制 right/bottom 不大於 window 大小
+      newLeft = Math.min(window.innerWidth - popupWidth, newLeft);
+      newTop = Math.min(window.innerHeight - popupHeight, newTop);
+      popup.style.left = `${newLeft}px`;
+      popup.style.top = `${newTop}px`;
       e.stopPropagation();
       return;
     }

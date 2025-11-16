@@ -1,7 +1,7 @@
 // modules/fileLoader.js
 
 import { extractGuanoMetadata, parseGuanoMetadata } from './guanoReader.js';
-import { addFilesToList, getFileList, getCurrentIndex, setCurrentIndex, removeFilesByName, setFileMetadata } from './fileState.js';
+import { addFilesToList, getFileList, getCurrentIndex, setCurrentIndex, removeFilesByName, setFileMetadata, getTimeExpansionMode } from './fileState.js';
 import { showMessageBox } from './messageBox.js';
 
 export async function getWavSampleRate(file) {
@@ -178,7 +178,9 @@ export function initFileLoader({
       const dur = await getWavDuration(fileItem);
       if (fileItem.size < 200 * 1024) {
         skippedSmall++;
-      } else if (dur > 20) {
+      } else if (dur > 20 && !getTimeExpansionMode()) {
+        // normally skip files longer than 20s, but allow when Time Expansion mode
+        // is active (user requested 10x time expansion)
         skippedLong++;
       } else {
         filteredList.push(fileItem);

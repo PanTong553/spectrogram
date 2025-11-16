@@ -115,10 +115,28 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
     }
   });  
 
+  // ✅ 新增：完整重置 zoom 狀態，不受先前狀態影響
+  function resetZoomState() {
+    // ✅ 強制重置 wrapper 和 container 寬度為 100%
+    // 這必須在計算之前做，否則 computeMinZoomLevel 會基於舊寬度
+    wrapperElement.style.width = '100%';
+    container.style.width = '100%';
+    
+    // ✅ 重新計算 minZoomLevel（基於重置後的寬度）
+    computeMinZoomLevel();
+    
+    // ✅ 強制 zoomLevel 為最小值
+    zoomLevel = minZoomLevel;
+    
+    // ✅ 調用 applyZoom 來應用新的 zoomLevel 和更新 UI
+    applyZoom();
+  }
+
   return {
     applyZoom,
     updateZoomButtons,
     getZoomLevel: () => zoomLevel,
     setZoomLevel,
+    resetZoomState,  // ✅ 暴露重置方法
   };
 }

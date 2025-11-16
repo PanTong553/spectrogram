@@ -1,5 +1,6 @@
 import { initDropdown } from "./dropdown.js";
 import { autoIdHK } from "./autoid_HK.js";
+import { getTimeExpansionMode } from './fileState.js';
 
 export function initAutoIdPanel({
   buttonId = 'autoIdBtn',
@@ -25,6 +26,30 @@ export function initAutoIdPanel({
   const linesSvg = document.createElementNS(svgNS, 'svg');
   linesSvg.id = 'autoid-lines';
   overlay.appendChild(linesSvg);
+
+  // Helpers for Time Expansion aware display/parse
+  function freqDisplayMultiplier() {
+    return getTimeExpansionMode() ? 10 : 1;
+  }
+  function formatFreqForDisplay(v) {
+    if (v == null || isNaN(v)) return '';
+    const disp = v * freqDisplayMultiplier();
+    return Math.abs(disp - Math.round(disp)) < 0.001 ? String(Math.round(disp)) : disp.toFixed(1);
+  }
+  function parseDisplayedFreq(el) {
+    if (!el) return NaN;
+    const raw = el.value === '' ? NaN : parseFloat(el.value);
+    if (isNaN(raw)) return NaN;
+    return raw / freqDisplayMultiplier();
+  }
+  function formatDurationForDisplay(ms) {
+    if (ms == null || isNaN(ms)) return '';
+    // When Time Expansion mode is active the displayed duration should be
+    // scaled down (divide by 10) because the timeline is expanded by 10x.
+    const denom = getTimeExpansionMode() ? 10 : 1;
+    const disp = ms / denom;
+    return Math.abs(disp - Math.round(disp)) < 0.001 ? String(Math.round(disp)) : disp.toFixed(1);
+  }
 
   const layout = document.getElementById('layout');
   if (layout && panel && panel.parentElement !== layout) {
@@ -213,8 +238,15 @@ export function initAutoIdPanel({
         showQCFDuration = duration < 1;
         const bw = Math.abs(heel.freq - knee.freq);
         if (duration > 0) {
-          const slope = bw / duration;
-          showQCFSlope = !(slope < 1 && slope >= 0.1);
+          // compute slope using displayed values so warnings match UI when Time Expansion is active
+          const freqMul = freqDisplayMultiplier();
+          const timeDenom = getTimeExpansionMode() ? 10 : 1;
+          const dispBw = bw * freqMul; // kHz displayed
+          const dispDur = duration / timeDenom; // ms displayed
+          if (dispDur > 0) {
+            const slope = dispBw / dispDur;
+            showQCFSlope = !(slope < 1 && slope >= 0.1);
+          }
         }
       } else if (knee?.freq != null && knee?.time != null && low?.freq != null && low?.time != null && (heel?.freq == null || heel?.time == null)) {
         // 2. Knee, Low 有值，Heel 無值
@@ -222,8 +254,14 @@ export function initAutoIdPanel({
         showQCFDuration = duration < 1;
         const bw = Math.abs(low.freq - knee.freq);
         if (duration > 0) {
-          const slope = bw / duration;
-          showQCFSlope = !(slope < 1 && slope >= 0.1);
+          const freqMul = freqDisplayMultiplier();
+          const timeDenom = getTimeExpansionMode() ? 10 : 1;
+          const dispBw = bw * freqMul;
+          const dispDur = duration / timeDenom;
+          if (dispDur > 0) {
+            const slope = dispBw / dispDur;
+            showQCFSlope = !(slope < 1 && slope >= 0.1);
+          }
         }
       }
     }
@@ -240,8 +278,14 @@ export function initAutoIdPanel({
         showQCFDuration = duration < 1;
       }
       if (bw != null && duration != null && duration > 0) {
-        const slope = bw / duration;
-        showQCFSlope = !(slope < 1 && slope >= 0.1);
+        const freqMul = freqDisplayMultiplier();
+        const timeDenom = getTimeExpansionMode() ? 10 : 1;
+        const dispBw = bw * freqMul;
+        const dispDur = duration / timeDenom;
+        if (dispDur > 0) {
+          const slope = dispBw / dispDur;
+          showQCFSlope = !(slope < 1 && slope >= 0.1);
+        }
       }
     }
     
@@ -477,8 +521,13 @@ export function initAutoIdPanel({
     data.harmonic = harmonicDropdown.selectedIndex;
     data.startTime = startTime;
     data.endTime = endTime;
+    // store internal (unscaled) frequency values so loadTab can render according
+    // to current Time Expansion mode
     Object.keys(inputs).forEach(k => {
-      data.inputs[k] = inputs[k].value;
+      const el = inputs[k];
+      if (!el) { data.inputs[k] = ''; return; }
+      const val = el.value === '' ? '' : String(parseDisplayedFreq(el));
+      data.inputs[k] = val;
     });
   }
 
@@ -490,11 +539,19 @@ export function initAutoIdPanel({
     harmonicDropdown.select(data.harmonic);
     suppressResultReset = false;
     Object.keys(inputs).forEach(k => {
-      inputs[k].value = data.inputs[k] || "" ;
-      if (data.markers[k].time != null) {
-        inputs[k].dataset.time = data.markers[k].time;
+      const el = inputs[k];
+      if (!el) return;
+      const stored = data.inputs[k];
+      if (stored === null || stored === undefined || stored === '') {
+        el.value = '';
       } else {
-        delete inputs[k].dataset.time;
+        const num = parseFloat(stored);
+        el.value = isNaN(num) ? '' : formatFreqForDisplay(num);
+      }
+      if (data.markers[k].time != null) {
+        el.dataset.time = data.markers[k].time;
+      } else {
+        delete el.dataset.time;
       }
     });
     startTime = data.startTime;
@@ -610,11 +667,18 @@ export function initAutoIdPanel({
 
   function updateDerived() {
     const callType = callTypeDropdown.items[callTypeDropdown.selectedIndex];
-    const high = parseFloat(inputs.high.value);
-    const low = parseFloat(inputs.low.value);
-    const knee = parseFloat(inputs.knee.value);
-    const cfStartVal = parseFloat(inputs.cfStart.value);
-    const endVal = parseFloat(inputs.end.value);
+    // parse displayed frequency inputs (UI may be scaled in Time Expansion mode)
+    const freqDiv = getTimeExpansionMode() ? 10 : 1;
+    const parseInputFreq = (el) => {
+      if (!el) return NaN;
+      const v = el.value === '' ? NaN : parseFloat(el.value);
+      return isNaN(v) ? NaN : (v / freqDiv);
+    };
+    const high = parseInputFreq(inputs.high);
+    const low = parseInputFreq(inputs.low);
+    const knee = parseInputFreq(inputs.knee);
+    const cfStartVal = parseInputFreq(inputs.cfStart);
+    const endVal = parseInputFreq(inputs.end);
     let bandwidth = null;
     // 新 Bandwidth 計算：取所有 marker 中有 freq 且有 value 的，找最大最小 freq
     const markerFreqs = Object.values(markers)
@@ -624,7 +688,9 @@ export function initAutoIdPanel({
       const maxFreq = Math.max(...markerFreqs);
       const minFreq = Math.min(...markerFreqs);
       bandwidth = maxFreq - minFreq;
-      bandwidthEl.textContent = bandwidth.toFixed(1);
+      // display bandwidth adjusted for Time Expansion mode
+      const dispBw = bandwidth * (getTimeExpansionMode() ? 10 : 1);
+      bandwidthEl.textContent = dispBw.toFixed(1);
     } else {
       bandwidthEl.textContent = '-';
     }
@@ -634,7 +700,10 @@ export function initAutoIdPanel({
     if (times.length >= 2) {
       const max = Math.max(...times);
       const min = Math.min(...times);
-      durationEl.textContent = ((max - min) * 1000).toFixed(1);
+      // display duration adjusted for Time Expansion mode (show longer when expanded)
+      const durMs = (max - min) * 1000;
+      // Use the centralized formatter so Time Expansion scaling is consistent
+      durationEl.textContent = formatDurationForDisplay(durMs);
     } else {
       durationEl.textContent = '-';
     }
@@ -761,7 +830,7 @@ export function initAutoIdPanel({
         m.el.dataset.freq = m.freq;
         m.el.dataset.time = m.time;
       // 動態更新 data-title 內容
-  const title = `${markerTitles[key] || key} (${Number(m.freq).toFixed(1)} kHz)`;
+  const title = `${markerTitles[key] || key} (${formatFreqForDisplay(Number(m.freq))} kHz)`;
   m.el.dataset.title = title;
   m.el.setAttribute('aria-label', title);
         minX = Math.min(minX, x);
@@ -1030,7 +1099,7 @@ export function initAutoIdPanel({
     const time = ((x + scrollLeft) / container.scrollWidth) * getDuration();
     const input = inputs[draggingKey];
     if (input) {
-      input.value = freq.toFixed(1);
+      input.value = formatFreqForDisplay(freq);
       input.dataset.time = time;
       if (input === inputs.start) startTime = time;
       if (input === inputs.end) endTime = time;
@@ -1109,9 +1178,9 @@ export function initAutoIdPanel({
   }
 
   function setMarkerAt(key, freq, time) {
-    const input = inputs[key];
-    if (!input) return;
-    input.value = freq.toFixed(1);
+  const input = inputs[key];
+  if (!input) return;
+  input.value = formatFreqForDisplay(freq);
     input.dataset.time = time;
     markers[key].freq = freq;
     markers[key].time = time;
@@ -1250,7 +1319,7 @@ export function initAutoIdPanel({
     const freq = (1 - y / spectrogramHeight) * (max - min) + min;
     const time = ((x + scrollLeft) / container.scrollWidth) * getDuration();
     const key = active.dataset.key;
-    active.value = freq.toFixed(1);
+  active.value = formatFreqForDisplay(freq);
     active.dataset.time = time;
     markers[key].freq = freq;
     markers[key].time = time;
@@ -1298,10 +1367,11 @@ export function initAutoIdPanel({
     };
     const required = requiredMap[callType] || [];
     let allValid = true;
+    const freqKeys = ['start','end','high','low','knee','heel','cfStart','cfEnd'];
     Object.entries(inputs).forEach(([key, el]) => {
       if (!el) return;
       if (required.includes(key)) {
-        const val = parseFloat(el.value);
+        const val = freqKeys.includes(key) ? parseDisplayedFreq(el) : parseFloat(el.value);
         const isValid = !isNaN(val);
         if (showValidation) {
           el.classList.toggle('invalid', !isValid);
@@ -1323,14 +1393,15 @@ export function initAutoIdPanel({
       return;
     }
     const callType = callTypeDropdown.items[callTypeDropdown.selectedIndex];
-    const high = parseFloat(inputs.high.value);
-    const low = parseFloat(inputs.low.value);
-    const knee = parseFloat(inputs.knee.value);
-    const heel = parseFloat(inputs.heel.value);
-    const start = parseFloat(inputs.start.value);
-    const end = parseFloat(inputs.end.value);
-    const cfStart = parseFloat(inputs.cfStart.value);
-    const cfEnd = parseFloat(inputs.cfEnd.value);
+  // parse displayed freq inputs back to internal kHz values
+  const high = parseDisplayedFreq(inputs.high);
+  const low = parseDisplayedFreq(inputs.low);
+  const knee = parseDisplayedFreq(inputs.knee);
+  const heel = parseDisplayedFreq(inputs.heel);
+  const start = parseDisplayedFreq(inputs.start);
+  const end = parseDisplayedFreq(inputs.end);
+  const cfStart = parseDisplayedFreq(inputs.cfStart);
+  const cfEnd = parseDisplayedFreq(inputs.cfEnd);
 
     let duration = null;
     const times = Object.values(markers)
@@ -1361,24 +1432,36 @@ export function initAutoIdPanel({
       10
     );
 
-    const res = autoIdHK({
+    // Adjust values according to Time Expansion so autoIdHK receives the
+    // same scale as the UI displays. When Time Expansion is active:
+    // - displayed frequencies are internal * 10
+    // - displayed durations are internal / 10
+    const freqMul = getTimeExpansionMode() ? 10 : 1;
+    const timeDenom = getTimeExpansionMode() ? 10 : 1;
+
+    const scaled = {
       callType,
       harmonic,
-      highestFreq: high,
-      lowestFreq: low,
-      kneeFreq: knee,
-      heelFreq: heel,
-      startFreq: start,
-      endFreq: end,
-      cfStart,
-      cfEnd,
-      duration,
-      bandwidth,
-      kneeLowTime,
-      kneeLowBandwidth,
-      heelLowBandwidth,
-      kneeHeelBandwidth
-    });
+      // frequencies/bandwidth in displayed kHz when TE active
+      highestFreq: isNaN(high) ? high : high * freqMul,
+      lowestFreq: isNaN(low) ? low : low * freqMul,
+      kneeFreq: isNaN(knee) ? knee : knee * freqMul,
+      heelFreq: isNaN(heel) ? heel : heel * freqMul,
+      startFreq: isNaN(start) ? start : start * freqMul,
+      endFreq: isNaN(end) ? end : end * freqMul,
+      cfStart: isNaN(cfStart) ? cfStart : cfStart * freqMul,
+      cfEnd: isNaN(cfEnd) ? cfEnd : cfEnd * freqMul,
+      // durations in displayed ms when TE active
+      duration: duration == null || isNaN(duration) ? duration : (duration / timeDenom),
+      // bandwidths in displayed kHz when TE active
+      bandwidth: bandwidth == null || isNaN(bandwidth) ? bandwidth : (bandwidth * freqMul),
+      kneeLowTime: kneeLowTime == null || isNaN(kneeLowTime) ? kneeLowTime : (kneeLowTime / timeDenom),
+      kneeLowBandwidth: kneeLowBandwidth == null || isNaN(kneeLowBandwidth) ? kneeLowBandwidth : (kneeLowBandwidth * freqMul),
+      heelLowBandwidth: heelLowBandwidth == null || isNaN(heelLowBandwidth) ? heelLowBandwidth : (heelLowBandwidth * freqMul),
+      kneeHeelBandwidth: kneeHeelBandwidth == null || isNaN(kneeHeelBandwidth) ? kneeHeelBandwidth : (kneeHeelBandwidth * freqMul)
+    };
+
+    const res = autoIdHK(scaled);
     tabData[currentTab].autoIdResult = res;
     updateResultDisplay();
     updateMarkers();

@@ -1,3 +1,5 @@
+import { getTimeExpansionMode } from './fileState.js';
+
 export function initFrequencyHover({
   viewerId,
   wrapperId = 'viewer-wrapper',
@@ -104,8 +106,11 @@ export function initFrequencyHover({
     freqLabel.style.top = `${y}px`;
     freqLabel.style.left = labelLeft;
     freqLabel.style.display = 'block';
-    const freqText = Number(freq.toFixed(1)).toString();
-    freqLabel.textContent = `${freqText} kHz  ${(time * 1000).toFixed(1)} ms`;
+    const timeExp = getTimeExpansionMode();
+    const displayFreq = timeExp ? (freq * 10) : freq;
+    const displayTimeMs = timeExp ? (time * 1000 / 10) : (time * 1000);
+    const freqText = Number(displayFreq.toFixed(1)).toString();
+    freqLabel.textContent = `${freqText} kHz  ${displayTimeMs.toFixed(1)} ms`;
   };
 
   viewer.addEventListener('mousemove', updateHoverDisplay, { passive: true });
@@ -118,6 +123,26 @@ export function initFrequencyHover({
   if (zoomControls) {
     zoomControls.addEventListener('mouseenter', () => { suppressHover = true; hideAll(); });
     zoomControls.addEventListener('mouseleave', () => { suppressHover = false; });
+  }
+
+  // 右上角 selection time info 元素
+  const selectionTimeInfo = document.getElementById('selection-time-info');
+
+  function showSelectionTimeInfo(startMs, endMs) {
+    const timeExp = getTimeExpansionMode();
+    const s = Math.min(startMs, endMs);
+    const e = Math.max(startMs, endMs);
+    const d = e - s;
+    // startMs/endMs are in ms (internal). In Time Expansion mode we display
+    // time values divided by 10.
+    const displayS = timeExp ? (s / 10) : s;
+    const displayE = timeExp ? (e / 10) : e;
+    const displayD = timeExp ? (d / 10) : d;
+    selectionTimeInfo.textContent = `Selection time: ${displayS.toFixed(1)} - ${displayE.toFixed(1)} (${displayD.toFixed(1)}ms)`;
+    selectionTimeInfo.style.display = '';
+  }
+  function hideSelectionTimeInfo() {
+    selectionTimeInfo.style.display = 'none';
   }
 
   function startSelection(clientX, clientY, type) {
@@ -145,8 +170,14 @@ export function initFrequencyHover({
       currentX = clamp(currentX, 0, viewer.scrollWidth);
       currentY = clamp(currentY, 0, viewer.clientHeight - getScrollbarThickness());
       const x = Math.min(currentX, startX);
-      const y = Math.min(currentY, startY);
       const width = Math.abs(currentX - startX);
+      // 計算時間
+      const actualWidth = getDuration() * getZoomLevel();
+      const startTime = (startX / actualWidth) * getDuration() * 1000;
+      const endTime = (currentX / actualWidth) * getDuration() * 1000;
+      showSelectionTimeInfo(startTime, endTime);
+      // 畫框
+      const y = Math.min(currentY, startY);
       const height = Math.abs(currentY - startY);
       selectionRect.style.left = `${x}px`;
       selectionRect.style.top = `${y}px`;
@@ -159,6 +190,7 @@ export function initFrequencyHover({
       isDrawing = false;
       window.removeEventListener(moveEv, moveHandler);
       window.removeEventListener(upEv, upHandler);
+      hideSelectionTimeInfo();
 
       const rect = selectionRect.getBoundingClientRect();
       const viewerRect = viewer.getBoundingClientRect();
@@ -257,9 +289,11 @@ export function initFrequencyHover({
       selObj.tooltip = buildTooltip(selObj, left, top, width);
     }
 
-    const durationLabel = document.createElement('div');
-    durationLabel.className = 'selection-duration';
-    durationLabel.textContent = `${(Duration * 1000).toFixed(1)} ms`;
+  const durationLabel = document.createElement('div');
+  durationLabel.className = 'selection-duration';
+  const timeExp = getTimeExpansionMode();
+  const displayDurationMs = timeExp ? (Duration * 1000 / 10) : (Duration * 1000);
+  durationLabel.textContent = `${displayDurationMs.toFixed(1)} ms`;
     rectObj.appendChild(durationLabel);
     selObj.durationLabel = durationLabel;
 
@@ -301,12 +335,21 @@ export function initFrequencyHover({
     tooltip.className = 'draggable-tooltip freq-tooltip';
     tooltip.style.left = `${left + width + 10}px`;
     tooltip.style.top = `${top}px`;
+    // Adapt displayed values for Time Expansion mode
+    const timeExp = getTimeExpansionMode();
+    const freqMul = timeExp ? 10 : 1;
+    const timeDiv = timeExp ? 10 : 1; // divide ms by 10 when timeExp
+    const dispFhigh = Fhigh * freqMul;
+    const dispFlow = Flow * freqMul;
+    const dispBandwidth = Bandwidth * freqMul;
+    const dispDurationMs = (Duration * 1000) / timeDiv;
+    const dispSlope = dispDurationMs > 0 ? (dispBandwidth / dispDurationMs) : 0;
     tooltip.innerHTML = `
-      <div><b>F.high:</b> <span class="fhigh">${Fhigh.toFixed(1)}</span> kHz</div>
-      <div><b>F.Low:</b> <span class="flow">${Flow.toFixed(1)}</span> kHz</div>
-      <div><b>Bandwidth:</b> <span class="bandwidth">${Bandwidth.toFixed(1)}</span> kHz</div>
-      <div><b>Duration:</b> <span class="duration">${(Duration * 1000).toFixed(1)}</span> ms</div>
-      <div><b>Avg.Slope:</b> <span class="slope">${(Bandwidth / (Duration * 1000)).toFixed(1)}</span> kHz/ms</div>
+      <div><b>F.high:</b> <span class="fhigh">${dispFhigh.toFixed(1)}</span> kHz</div>
+      <div><b>F.Low:</b> <span class="flow">${dispFlow.toFixed(1)}</span> kHz</div>
+      <div><b>Bandwidth:</b> <span class="bandwidth">${dispBandwidth.toFixed(1)}</span> kHz</div>
+      <div><b>Duration:</b> <span class="duration">${dispDurationMs.toFixed(1)}</span> ms</div>
+      <div><b>Avg.Slope:</b> <span class="slope">${dispSlope.toFixed(1)}</span> kHz/ms</div>
       <div class="tooltip-close-btn">×</div>
     `;
     tooltip.addEventListener('mouseenter', () => { isOverTooltip = true; suppressHover = true; hideAll(); });
@@ -570,17 +613,26 @@ export function initFrequencyHover({
     const Fhigh = data.Fhigh;
     const Bandwidth = Fhigh - Flow;
     const Duration = (data.endTime - data.startTime);
+    const timeExp = getTimeExpansionMode();
+    const freqMul = timeExp ? 10 : 1;
+    const timeDiv = timeExp ? 10 : 1;
+    const dispFhigh = Fhigh * freqMul;
+    const dispFlow = Flow * freqMul;
+    const dispBandwidth = Bandwidth * freqMul;
+    const dispDurationMs = (Duration * 1000) / timeDiv;
+    const dispSlope = dispDurationMs > 0 ? (dispBandwidth / dispDurationMs) : 0;
+
     if (!tooltip) {
-      if (sel.durationLabel) sel.durationLabel.textContent = `${(Duration * 1000).toFixed(1)} ms`;
+      if (sel.durationLabel) sel.durationLabel.textContent = `${dispDurationMs.toFixed(1)} ms`;
       return;
     }
-    if (sel.durationLabel) sel.durationLabel.textContent = `${(Duration * 1000).toFixed(1)} ms`;
+    if (sel.durationLabel) sel.durationLabel.textContent = `${dispDurationMs.toFixed(1)} ms`;
 
-    tooltip.querySelector('.fhigh').textContent = Fhigh.toFixed(1);
-    tooltip.querySelector('.flow').textContent = Flow.toFixed(1);
-    tooltip.querySelector('.bandwidth').textContent = Bandwidth.toFixed(1);
-    tooltip.querySelector('.duration').textContent = (Duration * 1000).toFixed(1);
-    tooltip.querySelector('.slope').textContent = (Bandwidth / (Duration * 1000)).toFixed(1);
+    tooltip.querySelector('.fhigh').textContent = dispFhigh.toFixed(1);
+    tooltip.querySelector('.flow').textContent = dispFlow.toFixed(1);
+    tooltip.querySelector('.bandwidth').textContent = dispBandwidth.toFixed(1);
+    tooltip.querySelector('.duration').textContent = dispDurationMs.toFixed(1);
+    tooltip.querySelector('.slope').textContent = dispSlope.toFixed(1);
   }
 
   function updateSelections() {

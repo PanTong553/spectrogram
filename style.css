@@ -1,3 +1,12 @@
+/* === Selection Time Info (右上角) === */
+#selection-time-info {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  z-index: 1200;
+  font-size: 12px;
+  background: rgba(255,255,255,0.92);
+}
 /* === 全局樣式 === */
 html, body {
   padding: 0 5px;
@@ -1124,6 +1133,19 @@ body.autoid-open #autoIdBtn {
   background-color: #007bff;
 }
 
+/* Flash Mode active state */
+body.flashmode-active #flashModeBtn {
+  background-color: #ffd700;
+}
+
+body.flashmode-active #flashModeBtn i {
+  color: black;
+}
+/* Time Expansion active state — same blue used for setting/map/autoid */
+body.timeexp-open #timeexpBtn {
+  background-color: #007bff;
+}
+
 input.tag-button {
   width: 90px;
   margin-bottom: 4px;
@@ -1286,10 +1308,6 @@ input.tag-button.editing {
 /* === Map Popup === */
 .map-popup {
   position: absolute;
-  top: 80px;
-  left: 80px;
-  width: 500px;
-  height: 500px;
   background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
@@ -1587,7 +1605,7 @@ input.tag-button.editing {
 .map-marker-device i{
   font-size: 28px;
   line-height: 28px;
-  color: #ffd700;
+  color: #007bff;
   opacity: 1;
   transform: scale(1);
   transform-origin: bottom center;
@@ -1598,10 +1616,55 @@ input.tag-button.editing {
 .map-tooltip {
   background: #ffffff;
   color: #000000;
-  border: 1px solid rgba(0,0,0,0.2);
   border-radius: 4px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
   white-space: nowrap;
+}
+
+/* Pinned popup should visually match the tooltip style.
+   Leaflet popup structure:
+   .leaflet-popup.map-tooltip-pinned > .leaflet-popup-content-wrapper
+   and .leaflet-popup-tip
+*/
+
+.leaflet-fade-anim .leaflet-map-pane .leaflet-popup {
+    opacity: 0.9 !important;
+}
+
+.leaflet-popup.map-tooltip-pinned .leaflet-popup-content-wrapper,
+.map-tooltip-pinned .leaflet-popup-content-wrapper {
+  background: rgba(51, 51, 51, 0.9);
+  color: #fff;
+  font-family: "Helvetica Neue", Arial, Helvetica, sans-serif;
+  border: 1px solid rgba(51, 51, 51, 0.9);
+  border-radius: 3px;
+  padding: 6px 5px 6px 6px;
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+}
+
+.leaflet-popup.map-tooltip-pinned .leaflet-popup-tip,
+.map-tooltip-pinned .leaflet-popup-tip {
+  /* make the tip match wrapper background */
+  background: transparent; /* keep existing svg/shape but color via pseudo/borders */
+}
+
+.leaflet-popup.map-tooltip-pinned .leaflet-popup-tip-container .leaflet-popup-tip {
+  background: rgba(51, 51, 51, 0.9);
+  box-shadow: none;
+  margin-top: -17px;
+}
+
+/* ensure popup content has small font/size similar to tooltip */
+.leaflet-popup.map-tooltip-pinned .leaflet-popup-content {
+  padding: 0;
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+/* allow pointer events so popup can be interactive if needed */
+.leaflet-popup.map-tooltip-pinned {
+  pointer-events: auto;
 }
 
 /* Route toggle and buttons */
@@ -1979,4 +2042,61 @@ input.tag-button.editing {
   font-weight: bold;
   color: #888;
   pointer-events: none;
+}
+
+/* === Marker Clustering System === */
+
+/* Cluster marker container */
+.cluster-marker-container {
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+}
+
+/* Cluster marker icon */
+.cluster-marker-icon {
+  width: 40px;
+  height: 40px;
+  background: linear-gradient(135deg, #ffe452 0%, #ffbf01 100%);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #000;
+  font-weight: bold;
+  font-size: 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  cursor: default;
+  transition: transform 0.2s ease;
+  opacity: 0.8;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  pointer-events: none;
+}
+
+.cluster-marker-icon:hover,
+.cluster-marker-icon.cluster-marker-hover {
+  transform: scale(1.2);
+}
+
+/* Cluster tooltip */
+.cluster-tooltip {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+  color: #222 !important;
+  border: 1px solid #fff !important;
+  border-radius: 6px !important;
+  padding: 6px 10px !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+}
+
+
+/* Individual survey marker when not clustered */
+.map-marker-survey {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.2));
+}
+
+.map-marker-survey:hover {
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4));
 }

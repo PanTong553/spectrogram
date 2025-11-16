@@ -152,3 +152,20 @@ export function removeFilesByName(name) {
     fileMetadata = {};
   }
 }
+
+// Time Expansion mode flag - when true, UI displays frequency values *10 and
+// loading will allow longer files. Use the getters/setters below to control it.
+let timeExpansionMode = false;
+
+export function setTimeExpansionMode(state) {
+  timeExpansionMode = !!state;
+}
+
+export function getTimeExpansionMode() {
+  return !!timeExpansionMode;
+}
+
+export function toggleTimeExpansionMode() {
+  timeExpansionMode = !timeExpansionMode;
+  return timeExpansionMode;
+}
