@@ -56,6 +56,7 @@ let currentFftSize = 1024;
 let currentWindowType = 'hann';
 let currentOverlap = 'auto';
 let currentAudioBufferLength = 0;
+let savedAudioBufferLengthBeforeExpand = null;
 let overlapWarningShown = false;
 let freqHoverControl = null;
 let autoIdControl = null;
@@ -392,6 +393,11 @@ onBeforeLoad: () => {
     expandHistory = [];
     currentExpandBlob = null;
     updateExpandBackBtn();
+    // restore original audio length if we saved it
+    if (savedAudioBufferLengthBeforeExpand !== null) {
+      currentAudioBufferLength = savedAudioBufferLengthBeforeExpand;
+      savedAudioBufferLengthBeforeExpand = null;
+    }
   }
 },
   onAfterLoad: () => {
@@ -670,6 +676,8 @@ viewer.addEventListener('expand-selection', async (e) => {
     const blob = await cropWavBlob(base, startTime, endTime);
     if (blob) {
       expandHistory.push({ src: base, freqMin: currentFreqMin, freqMax: currentFreqMax });
+      // Save original audio length so we can restore when leaving expansion
+      savedAudioBufferLengthBeforeExpand = currentAudioBufferLength;
       // Set selectionExpandMode true BEFORE loadBlob so decode handler sees it
       selectionExpandMode = true;
       try {
@@ -677,6 +685,7 @@ viewer.addEventListener('expand-selection', async (e) => {
       } catch (err) {
         // if load fails, revert selectionExpandMode and rethrow
         selectionExpandMode = false;
+        savedAudioBufferLengthBeforeExpand = null;
         throw err;
       }
       currentExpandBlob = blob;
@@ -714,6 +723,7 @@ viewer.addEventListener('fit-window-selection', async (e) => {
         await getWavesurfer().loadBlob(blob);
       } catch (err) {
         selectionExpandMode = false;
+        savedAudioBufferLengthBeforeExpand = null;
         throw err;
       }
       currentExpandBlob = blob;
@@ -972,7 +982,7 @@ function updateSpectrogramSettingsText() {
   const fftSize = currentFftSize;
   const overlap = currentOverlap === 'auto'
     ? getAutoOverlapPercent()
-    : getOverlapPercent();
+    : getPluginUsedOverlapPercentFromManual(currentOverlap);
   const windowType = currentWindowType.charAt(0).toUpperCase() + currentWindowType.slice(1);
 
   const overlapText = currentOverlap === 'auto'
@@ -1004,6 +1014,19 @@ function getOverlapPercent() {
   return isNaN(parsed) ? null : parsed;
 }
 
+/**
+ * Convert a user-specified overlap percent to the percent that the plugin
+ * will actually use (plugin computes noverlap = floor(fft * pct / 100)).
+ */
+function getPluginUsedOverlapPercentFromManual(pct) {
+  const parsed = parseInt(pct, 10);
+  if (isNaN(parsed)) return null;
+  const fft = currentFftSize;
+  if (!fft) return null;
+  const noverlap = Math.floor(fft * (parsed / 100));
+  return Math.floor((noverlap / fft) * 100);
+}
+
 function getAutoOverlapPercent(overriddenBufferLength = null) {
   // 優先使用傳入的 bufferLength，其次是 currentAudioBufferLength，最後回退到 wavesurfer backend
   const bufferLength = overriddenBufferLength !== null
@@ -1016,7 +1039,10 @@ function getAutoOverlapPercent(overriddenBufferLength = null) {
   if (bufferLength && canvasWidth && fft) {
     const samplesPerCol = bufferLength / canvasWidth;
     const noverlap = Math.max(0, Math.round(fft - samplesPerCol));
-    return Math.round((noverlap / fft) * 100);
+    // Display the percentage that corresponds to plugin's internal integer
+    // noverlap. Use floor to match how a user-set percentage is converted
+    // to noverlap in the plugin pipeline.
+    return Math.floor((noverlap / fft) * 100);
   }
   return null;
 }
@@ -1320,6 +1346,11 @@ expandBackBtn.addEventListener('click', async () => {
       duration = getWavesurfer().getDuration();
       currentExpandBlob = null;
       selectionExpandMode = false;
+      // Restore original audio buffer length if we saved it before expansion
+      if (savedAudioBufferLengthBeforeExpand !== null) {
+        currentAudioBufferLength = savedAudioBufferLengthBeforeExpand;
+        savedAudioBufferLengthBeforeExpand = null;
+      }
       sampleRateBtn.disabled = false;
       zoomControl.setZoomLevel(0);
       renderAxes();
@@ -1380,6 +1411,8 @@ document.addEventListener("file-loaded", async () => {
     const ac = new (window.AudioContext || window.webkitAudioContext)();
     const audioBuf = await ac.decodeAudioData(arrayBuf.slice(0));
     currentAudioBufferLength = audioBuf.length;
+    // If a saved original length from expansion exists, clear it because we just loaded the real file
+    savedAudioBufferLengthBeforeExpand = null;
     const workerOverlap = currentOverlap === 'auto'
       ? getAutoOverlapPercent()
       : getOverlapPercent();
@@ -1396,6 +1429,7 @@ expandHistory = [];
 currentExpandBlob = null;
 updateExpandBackBtn();
   currentAudioBufferLength = 0;
+  savedAudioBufferLengthBeforeExpand = null;
   playPauseBtn.disabled = true;
   hideStopButton();
   updateSpectrogramSettingsText();
