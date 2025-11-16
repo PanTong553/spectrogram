@@ -810,6 +810,15 @@ getWavesurfer().on('ready', () => {
 getWavesurfer().on('decode', () => {
   duration = getWavesurfer().getDuration();
   
+  // ✅ 在 selection expansion mode 時，更新 currentAudioBufferLength
+  // 確保 getAutoOverlapPercent() 使用正確的 buffer 長度
+  if (selectionExpandMode) {
+    const bufferData = getWavesurfer()?.backend?.buffer;
+    if (bufferData && bufferData.length) {
+      currentAudioBufferLength = bufferData.length;
+    }
+  }
+  
   // ✅ 強制重置所有寬度，確保不受先前 zoom 影響
   container.style.width = '100%';
   wrapper.style.width = '100%';
