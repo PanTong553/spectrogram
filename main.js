@@ -1026,7 +1026,13 @@ function getAutoOverlapPercent(overriddenBufferLength = null) {
   // 優先使用傳入的 bufferLength，其次是 currentAudioBufferLength，最後回退到 wavesurfer backend
   const bufferLength = overriddenBufferLength !== null
     ? overriddenBufferLength
-    : (currentAudioBufferLength || getWavesurfer()?.getDecodedData()?.length || getWavesurfer()?.backend?.buffer?.length);
+    : (
+      // If not in selectionExpandMode, prefer wavesurfer internal decoded length (original wav)
+      (!selectionExpandMode && getWavesurfer()?.getDecodedData()?.length) ||
+      currentAudioBufferLength ||
+      getWavesurfer()?.getDecodedData()?.length ||
+      getWavesurfer()?.backend?.buffer?.length
+    );
   const canvasWidth = document
     .querySelector('#spectrogram-only canvas')
     ?.width || container.clientWidth;
@@ -1399,7 +1405,9 @@ document.addEventListener("file-loaded", async () => {
     const arrayBuf = await currentFile.arrayBuffer();
     const ac = new (window.AudioContext || window.webkitAudioContext)();
     const audioBuf = await ac.decodeAudioData(arrayBuf.slice(0));
-    currentAudioBufferLength = audioBuf.length;
+    // Prefer Wavesurfer decoded internal length for the original audio buffer when available
+    const wsDecodedLen = getWavesurfer()?.getDecodedData()?.length;
+    currentAudioBufferLength = wsDecodedLen || audioBuf.length;
     // If a saved original length from expansion exists, clear it because we just loaded the real file
     savedAudioBufferLengthBeforeExpand = null;
     const workerOverlap = currentOverlap === 'auto'
