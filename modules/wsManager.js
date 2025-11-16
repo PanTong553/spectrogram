@@ -128,6 +128,8 @@ export function replacePlugin(
       noverlap,
       windowFunc,
     });
+    // mark which plugin type we created for consumers to check
+    plugin.isFlashPlugin = true;
   } else {
     plugin = createSpectrogramPlugin({
       colorMap,
@@ -138,6 +140,7 @@ export function replacePlugin(
       noverlap,
       windowFunc,
     });
+    plugin.isFlashPlugin = false;
   }
   
 

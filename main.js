@@ -625,6 +625,34 @@ const zoomControl = initZoomControls(
     freqHoverControl?.refreshHover();
     autoIdControl?.updateMarkers();
     updateSpectrogramSettingsText();
+    // After zoom has been applied, switch to the flash plugin if the
+    // overlap percent crosses the threshold (<=30%). This handles the case
+    // where Auto overlap changes when the canvas width changes due to zoom.
+    try {
+      const useFlash = shouldUseFlashForReplace();
+      const curPlugin = getPlugin();
+      const isFlash = !!curPlugin?.isFlashPlugin;
+      if (useFlash !== isFlash) {
+        replacePlugin(
+          getCurrentColorMap(),
+          spectrogramHeight,
+          currentFreqMin,
+          currentFreqMax,
+          getOverlapPercent(),
+          () => {
+            renderAxes();
+            freqHoverControl?.refreshHover();
+            autoIdControl?.updateMarkers();
+            updateSpectrogramSettingsText();
+          },
+          currentFftSize,
+          currentWindowType,
+          useFlash
+        );
+      }
+    } catch (e) {
+      console.error('Failed to maybe replace plugin after zoom', e);
+    }
   },
   () => selectionExpandMode,
   () => {
@@ -829,6 +857,34 @@ getWavesurfer().on('ready', () => {
     updateProgressLine(0);
 
     getPlugin()?.render();
+    // Ensure the plugin type matches overlap threshold on file ready. This
+    // is important when returning from selection expand mode where buffer
+    // length can change and auto-overlap may need to switch implementation.
+    try {
+      const useFlash = shouldUseFlashForReplace();
+      const curPlugin = getPlugin();
+      const isFlash = !!curPlugin?.isFlashPlugin;
+      if (useFlash !== isFlash) {
+        replacePlugin(
+          getCurrentColorMap(),
+          spectrogramHeight,
+          currentFreqMin,
+          currentFreqMax,
+          getOverlapPercent(),
+          () => {
+            renderAxes();
+            freqHoverControl?.refreshHover();
+            autoIdControl?.updateMarkers();
+            updateSpectrogramSettingsText();
+          },
+          currentFftSize,
+          currentWindowType,
+          useFlash
+        );
+      }
+    } catch (e) {
+      console.error('Failed to maybe replace plugin on ready', e);
+    }
     requestAnimationFrame(() => {
       renderAxes();
       freqHoverControl?.refreshHover();
@@ -1019,10 +1075,6 @@ function getOverlapPercent() {
   return isNaN(parsed) ? null : parsed;
 }
 
-/**
- * Convert a user-specified overlap percent to the percent that the plugin
- * will actually use (plugin computes noverlap = floor(fft * pct / 100)).
- */
 function getPluginUsedOverlapPercentFromManual(pct) {
   const parsed = parseInt(pct, 10);
   if (isNaN(parsed)) return null;
@@ -1464,6 +1516,34 @@ updateExpandBackBtn();
   playPauseBtn.disabled = true;
   hideStopButton();
   updateSpectrogramSettingsText();
+  // After a file finishes loading, ensure the implemented plugin matches the
+  // current overlap threshold. This handles transitions from selection
+  // expansion back to the original file.
+  try {
+    const useFlash = shouldUseFlashForReplace();
+    const curPlugin = getPlugin();
+    const isFlash = !!curPlugin?.isFlashPlugin;
+    if (useFlash !== isFlash) {
+      replacePlugin(
+        getCurrentColorMap(),
+        spectrogramHeight,
+        currentFreqMin,
+        currentFreqMax,
+        getOverlapPercent(),
+        () => {
+          renderAxes();
+          freqHoverControl?.refreshHover();
+          autoIdControl?.updateMarkers();
+          updateSpectrogramSettingsText();
+        },
+        currentFftSize,
+        currentWindowType,
+        useFlash
+      );
+    }
+  } catch (e) {
+    console.error('Failed to maybe replace plugin on file-loaded', e);
+  }
 });
 
 window.addEventListener('resize', () => {
