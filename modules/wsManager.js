@@ -2,6 +2,7 @@
 
 import WaveSurfer from './wavesurfer.esm.js';
 import Spectrogram from './spectrogram.esm.js';
+import SpectrogramFlash from './spectrogram-flash.esm.js';
 
 let ws = null;
 let plugin = null;
@@ -53,6 +54,33 @@ export function createSpectrogramPlugin({
   return Spectrogram.create(baseOptions);
 }
 
+export function createSpectrogramFlashPlugin({
+  colorMap,
+  height = 800,
+  frequencyMin = 10,
+  frequencyMax = 128,
+  fftSamples = 1024,
+  noverlap = null,
+  windowFunc = 'hann',
+}) {
+  const baseOptions = {
+    labels: false,
+    height,
+    fftSamples,
+    frequencyMin: frequencyMin * 1000,
+    frequencyMax: frequencyMax * 1000,
+    scale: 'linear',
+    windowFunc,
+    colorMap,
+  };
+
+  if (noverlap !== null) {
+    baseOptions.noverlap = noverlap;
+  }
+
+  return SpectrogramFlash.create(baseOptions);
+}
+
 export function replacePlugin(
   colorMap,
   height = 800,
@@ -61,7 +89,8 @@ export function replacePlugin(
   overlapPercent = null,
   onRendered = null,  // ✅ 傳入 callback
   fftSamples = currentFftSize,
-  windowFunc = currentWindowType
+  windowFunc = currentWindowType,
+  useFlash = false
 ) {
   if (!ws) throw new Error('Wavesurfer not initialized.');
   const container = document.getElementById("spectrogram-only");
@@ -88,15 +117,29 @@ export function replacePlugin(
     ? Math.floor(fftSamples * (overlapPercent / 100))
     : null;
 
-  plugin = createSpectrogramPlugin({
-    colorMap,
-    height,
-    frequencyMin,
-    frequencyMax,
-    fftSamples,
-    noverlap,
-    windowFunc,
-  });
+  // Choose the optimized 'flash' plugin for lower overlap percentages when requested
+  if (useFlash) {
+    plugin = createSpectrogramFlashPlugin({
+      colorMap,
+      height,
+      frequencyMin,
+      frequencyMax,
+      fftSamples,
+      noverlap,
+      windowFunc,
+    });
+  } else {
+    plugin = createSpectrogramPlugin({
+      colorMap,
+      height,
+      frequencyMin,
+      frequencyMax,
+      fftSamples,
+      noverlap,
+      windowFunc,
+    });
+  }
+  
 
   ws.registerPlugin(plugin);
 
