@@ -825,11 +825,13 @@ getWavesurfer().on('ready', () => {
 getWavesurfer().on('decode', () => {
   duration = getWavesurfer().getDuration();
   
-  // 更新 currentAudioBufferLength：使用 decodedData 長度（首選），未取得時使用 backend.buffer
-  const decodedLen = getWavesurfer()?.getDecodedData()?.length;
-  const backendLen = getWavesurfer()?.backend?.buffer?.length;
-  if (decodedLen || backendLen) {
-    currentAudioBufferLength = decodedLen || backendLen;
+  // ✅ 在 selection expansion mode 時，從 wavesurfer backend 獲取新的 buffer 長度
+  if (selectionExpandMode) {
+    // Try to get decoded data length from wavesurfer; fallback to backend buffer
+    const newBufferLength = getWavesurfer()?.getDecodedData()?.length || getWavesurfer()?.backend?.buffer?.length;
+    if (newBufferLength) {
+      currentAudioBufferLength = newBufferLength;
+    }
   }
   
   // ✅ 強制重置所有寬度，確保不受先前 zoom 影響
@@ -968,15 +970,14 @@ function updateSpectrogramSettingsText() {
   const textElem = document.getElementById('spectrogram-settings-text');
   const sampleRate = currentSampleRate;
   const fftSize = currentFftSize;
-  // Use a display percent that matches plugin internal noverlap calculation
-  // (the plugin floors percent->samples). For actual rendering we still use
-  // workerOverlap = getAutoOverlapPercent()/getOverlapPercent().
-  const overlap = getDisplayedOverlapPercent();
+  const overlap = currentOverlap === 'auto'
+    ? getAutoOverlapPercent()
+    : getOverlapPercent();
   const windowType = currentWindowType.charAt(0).toUpperCase() + currentWindowType.slice(1);
 
   const overlapText = currentOverlap === 'auto'
     ? `Auto${overlap !== null ? ` (${overlap}%)` : ''}`
-    : (overlap !== null ? `${overlap}%` : '');
+    : `${overlap}%`;
   if (textElem) {
     textElem.textContent =
       `Sampling rate: ${sampleRate / 1000}kHz, FFT size: ${fftSize}, Overlap size: ${overlapText}, ${windowType} window`;
@@ -1015,28 +1016,9 @@ function getAutoOverlapPercent(overriddenBufferLength = null) {
   if (bufferLength && canvasWidth && fft) {
     const samplesPerCol = bufferLength / canvasWidth;
     const noverlap = Math.max(0, Math.round(fft - samplesPerCol));
-    // Plugin computes noverlap = Math.floor(fftSamples * (percent / 100)).
-    // To show the percent that the plugin will use, derive percent from
-    // the integer noverlap using Math.floor to match plugin behaviour.
-    return Math.floor((noverlap / fft) * 100);
+    return Math.round((noverlap / fft) * 100);
   }
   return null;
-}
-
-function getDisplayedOverlapPercent() {
-  // Return the displayed overlap percent that matches plugin's internal noverlap.
-  if (currentOverlap === 'auto') {
-    // Prefer explicit decoded buffer length if available to avoid a short
-    // timing window where canvas width / buffer length is not yet set.
-    const overrideLen = getWavesurfer()?.getDecodedData()?.length || getWavesurfer()?.backend?.buffer?.length;
-    return getAutoOverlapPercent(overrideLen);
-  }
-  const parsed = parseInt(currentOverlap, 10);
-  if (isNaN(parsed)) return null;
-  const fft = currentFftSize;
-  // plugin will compute floor(fft * percent/100) as noverlap
-  const pluginNoverlap = Math.floor(fft * (parsed / 100));
-  return Math.floor((pluginNoverlap / fft) * 100);
 }
 
 function formatFreqValue(value) {
