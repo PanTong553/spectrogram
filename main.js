@@ -689,9 +689,7 @@ viewer.addEventListener('expand-selection', async (e) => {
         throw err;
       }
       currentExpandBlob = blob;
-      zoomControl.resetZoomState();  // ✅ 使用完整重置
-      
-      // ✅ 強制重置 container 寬度
+      zoomControl.resetZoomState();
       container.style.width = '100%';
       
       sampleRateBtn.disabled = true;
@@ -700,9 +698,6 @@ viewer.addEventListener('expand-selection', async (e) => {
       freqHoverControl?.clearSelections();
       updateExpandBackBtn();
       autoIdControl?.reset();
-      // ✅ 移除此處的 updateSpectrogramSettingsText()，讓 decode 事件處理器負責
-      // updateSpectrogramSettingsText();
-      // 強制解除 suppressHover/isOverBtnGroup 狀態
       viewer.dispatchEvent(new CustomEvent('force-hover-enable'));
       freqHoverControl?.refreshHover();
     }
@@ -1023,8 +1018,8 @@ function getPluginUsedOverlapPercentFromManual(pct) {
   if (isNaN(parsed)) return null;
   const fft = currentFftSize;
   if (!fft) return null;
-  const noverlap = Math.floor(fft * (parsed / 100));
-  return Math.floor((noverlap / fft) * 100);
+  const noverlap = Math.round(fft * (parsed / 100));
+  return Math.round((noverlap / fft) * 100);
 }
 
 function getAutoOverlapPercent(overriddenBufferLength = null) {
@@ -1039,17 +1034,12 @@ function getAutoOverlapPercent(overriddenBufferLength = null) {
   if (bufferLength && canvasWidth && fft) {
     const samplesPerCol = bufferLength / canvasWidth;
     const noverlap = Math.max(0, Math.round(fft - samplesPerCol));
-    // Display the percentage that corresponds to plugin's internal integer
-    // noverlap. Use floor to match how a user-set percentage is converted
-    // to noverlap in the plugin pipeline.
-    return Math.floor((noverlap / fft) * 100);
+    return Math.round((noverlap / fft) * 100);
   }
   return null;
 }
 
 function formatFreqValue(value) {
-  // value is internal kHz value. If Time Expansion mode is active, the UI
-  // should display frequency values multiplied by 10.
   const timeExp = getTimeExpansionMode();
   const display = timeExp ? (value * 10) : value;
   return Math.abs(display - Math.round(display)) < 0.001
@@ -1068,7 +1058,6 @@ applyFreqRangeBtn.addEventListener('click', () => {
     return;
   }
 
-  // convert displayed values back to internal kHz space
   const min = dispMin / divisor;
   const max = dispMax / divisor;
   updateFrequencyRange(min, max);
