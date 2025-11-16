@@ -670,9 +670,16 @@ viewer.addEventListener('expand-selection', async (e) => {
     const blob = await cropWavBlob(base, startTime, endTime);
     if (blob) {
       expandHistory.push({ src: base, freqMin: currentFreqMin, freqMax: currentFreqMax });
-      await getWavesurfer().loadBlob(blob);
-      currentExpandBlob = blob;
+      // Set selectionExpandMode true BEFORE loadBlob so decode handler sees it
       selectionExpandMode = true;
+      try {
+        await getWavesurfer().loadBlob(blob);
+      } catch (err) {
+        // if load fails, revert selectionExpandMode and rethrow
+        selectionExpandMode = false;
+        throw err;
+      }
+      currentExpandBlob = blob;
       zoomControl.resetZoomState();  // ✅ 使用完整重置
       
       // ✅ 強制重置 container 寬度
@@ -701,9 +708,15 @@ viewer.addEventListener('fit-window-selection', async (e) => {
     const blob = await cropWavBlob(base, startTime, endTime);
     if (blob) {
       expandHistory.push({ src: base, freqMin: currentFreqMin, freqMax: currentFreqMax });
-      await getWavesurfer().loadBlob(blob);
-      currentExpandBlob = blob;
+      // Ensure selectionExpandMode is set before decoding so getAutoOverlapPercent() can use backend buffer
       selectionExpandMode = true;
+      try {
+        await getWavesurfer().loadBlob(blob);
+      } catch (err) {
+        selectionExpandMode = false;
+        throw err;
+      }
+      currentExpandBlob = blob;
       zoomControl.resetZoomState();  // ✅ 使用完整重置
       
       // ✅ 強制重置 container 寬度
@@ -814,7 +827,8 @@ getWavesurfer().on('decode', () => {
   
   // ✅ 在 selection expansion mode 時，從 wavesurfer backend 獲取新的 buffer 長度
   if (selectionExpandMode) {
-    const newBufferLength = getWavesurfer()?.backend?.buffer?.length;
+    // Try to get decoded data length from wavesurfer; fallback to backend buffer
+    const newBufferLength = getWavesurfer()?.getDecodedData()?.length || getWavesurfer()?.backend?.buffer?.length;
     if (newBufferLength) {
       currentAudioBufferLength = newBufferLength;
     }
@@ -994,7 +1008,7 @@ function getAutoOverlapPercent(overriddenBufferLength = null) {
   // 優先使用傳入的 bufferLength，其次是 currentAudioBufferLength，最後回退到 wavesurfer backend
   const bufferLength = overriddenBufferLength !== null
     ? overriddenBufferLength
-    : (currentAudioBufferLength || getWavesurfer()?.backend?.buffer?.length);
+    : (currentAudioBufferLength || getWavesurfer()?.getDecodedData()?.length || getWavesurfer()?.backend?.buffer?.length);
   const canvasWidth = document
     .querySelector('#spectrogram-only canvas')
     ?.width || container.clientWidth;
