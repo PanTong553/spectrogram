@@ -238,24 +238,6 @@ initWavesurfer({
   container,
   sampleRate: currentSampleRate,
 });
-// Ensure waveform scroll container never shows native horizontal scrollbar.
-// This prevents the reported layout shift / time-axis desync when overlap size is Auto.
-document.querySelectorAll('.scroll').forEach((el) => {
-  try {
-    el.style.overflowX = 'hidden';
-  } catch (e) {
-    // ignore if element not available yet
-  }
-});
-// Re-apply after each render/zoom to prevent library resetting it back to 'auto'
-const _ws_ref = getWavesurfer();
-if (_ws_ref) {
-  ['render', 'redraw', 'rendered', 'zoom'].forEach((ev) =>
-    _ws_ref.on(ev, () => {
-      document.querySelectorAll('.scroll').forEach((el) => (el.style.overflowX = 'hidden'));
-    })
-  );
-}
 getWavesurfer().on('finish', () => {
   playPauseBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
   playPauseBtn.title = 'Play (Ctrl + P)';
