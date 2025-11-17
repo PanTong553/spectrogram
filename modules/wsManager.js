@@ -148,9 +148,23 @@ export function replacePlugin(
 
   try {
     plugin.render();
+    // Ensure outer viewer container keeps overflow-x available so the
+    // scrollbar remains when using the flash plugin in auto overlap mode.
+    const outerViewer = document.getElementById('viewer-container');
+    if (outerViewer) {
+      outerViewer.style.overflowX = 'auto';
+    }
     requestAnimationFrame(() => {
       if (typeof onRendered === 'function') onRendered();
     });
+    // Re-bind ws scroll sync after plugin replacement so the time-axis
+    // keeps in sync with the active plugin's internal scroll container.
+    try {
+      initWsScrollSync({ scrollTargetId: 'time-axis-wrapper' });
+    } catch (e) {
+      // initWsScrollSync may not be available if the module is loaded
+      // differently — swallow failures gracefully.
+    }
   } catch (err) {
     console.warn('⚠️ Spectrogram render failed:', err);
   }
@@ -191,4 +205,43 @@ export function initScrollSync({
   source.addEventListener('scroll', () => {
     target.scrollLeft = source.scrollLeft;
   });
+}
+
+// Sync time axis to Wavesurfer's scroll events. Use wavesurfer's "scroll"
+// event so it works regardless of which scrollable element (outer viewer or
+// plugin internal scroll container) receives the scroll.
+export function initWsScrollSync({ scrollTargetId }) {
+  const target = document.getElementById(scrollTargetId);
+  if (!target) {
+    console.warn('[wsScrollSync] target not found.');
+    return;
+  }
+  if (!ws) {
+    console.warn('[wsScrollSync] wavesurfer not initialized yet.');
+    return;
+  }
+
+  // Remove any previously bound handlers to avoid duplicates
+  if (ws._timeAxisSyncCleanup) {
+    try { ws._timeAxisSyncCleanup(); } catch (e) { /* noop */ }
+    ws._timeAxisSyncCleanup = null;
+  }
+
+  const unsubscribe = ws.on('scroll', (startPct, endPct, scrollLeft) => {
+    // scrollLeft is the pixel offset; set scrollLeft of the target element.
+    // Guard for missing scrollLeft values.
+    if (typeof scrollLeft === 'number') {
+      target.scrollLeft = scrollLeft;
+    }
+  });
+
+  // Keep unsubscribe reference on ws so we can clear it when swapping plugins
+  ws._timeAxisSyncCleanup = unsubscribe;
+
+  // Initialize the time-axis scroll position from the current wavesurfer
+  try {
+    if (typeof ws.getScroll === 'function') target.scrollLeft = ws.getScroll();
+  } catch (e) {
+    // ignore - not critical
+  }
 }
