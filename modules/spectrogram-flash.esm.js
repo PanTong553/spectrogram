@@ -372,7 +372,8 @@ class SpectrogramPlugin extends BasePlugin {
 
     this.fftSamples = options.fftSamples || 512;
     this.height = options.height || 200;
-    this.noverlap = options.noverlap || null;
+    // Use nullish coalescing so 0 is a valid noverlap value (not treated as auto)
+    this.noverlap = options.noverlap ?? null;
     this.windowFunc = options.windowFunc || "hann";
     this.alpha = options.alpha;
 
@@ -753,7 +754,8 @@ class SpectrogramPlugin extends BasePlugin {
     const frequencies = [];
 
     let noverlap = this.noverlap;
-    if (!noverlap) {
+    // only auto-calc when noverlap is explicitly null/undefined
+    if (noverlap == null) {
       const uniqueSamplesPerPx = buffer.length / this.canvas.width;
       noverlap = Math.max(0, Math.round(fftSamples - uniqueSamplesPerPx));
     }
