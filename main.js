@@ -536,7 +536,6 @@ duration = getWavesurfer().getDuration();
     freqHoverControl?.refreshHover();
     autoIdControl?.updateMarkers();
     updateSpectrogramSettingsText();
-        if (scrollSync && typeof scrollSync.sync === 'function') scrollSync.sync();
     },
     currentFftSize,
     currentWindowType,
@@ -645,7 +644,6 @@ const zoomControl = initZoomControls(
             freqHoverControl?.refreshHover();
             autoIdControl?.updateMarkers();
             updateSpectrogramSettingsText();
-            if (scrollSync && typeof scrollSync.sync === 'function') scrollSync.sync();
           },
           currentFftSize,
           currentWindowType,
@@ -840,9 +838,9 @@ freqHoverControl?.clearSelections();
 onSampleRateDetected: autoSetSampleRate
 });
 
-const scrollSync = initScrollSync({
-  scrollSourceId: 'viewer-container',
-  scrollTargetId: 'time-axis-wrapper',
+initScrollSync({
+scrollSourceId: 'viewer-container',
+scrollTargetId: 'time-axis-wrapper',
 });
 
 getWavesurfer().on('ready', () => {
@@ -859,8 +857,6 @@ getWavesurfer().on('ready', () => {
     updateProgressLine(0);
 
     getPlugin()?.render();
-    // Ensure scroll sync after initial plugin render
-    if (scrollSync && typeof scrollSync.sync === 'function') scrollSync.sync();
     // Ensure the plugin type matches overlap threshold on file ready. This
     // is important when returning from selection expand mode where buffer
     // length can change and auto-overlap may need to switch implementation.
@@ -880,7 +876,6 @@ getWavesurfer().on('ready', () => {
             freqHoverControl?.refreshHover();
             autoIdControl?.updateMarkers();
             updateSpectrogramSettingsText();
-            if (scrollSync && typeof scrollSync.sync === 'function') scrollSync.sync();
           },
           currentFftSize,
           currentWindowType,
@@ -1167,7 +1162,6 @@ function handleFftSize(size) {
       freqHoverControl?.refreshHover();
       autoIdControl?.updateMarkers();
       updateSpectrogramSettingsText();
-      if (scrollSync && typeof scrollSync.sync === 'function') scrollSync.sync();
     },
     currentFftSize,
     currentWindowType,
@@ -1192,7 +1186,6 @@ function handleWindowType(type) {
       freqHoverControl?.refreshHover();
       autoIdControl?.updateMarkers();
       updateSpectrogramSettingsText();
-      if (scrollSync && typeof scrollSync.sync === 'function') scrollSync.sync();
     },
     currentFftSize,
     currentWindowType,

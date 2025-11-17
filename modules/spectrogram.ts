@@ -627,8 +627,7 @@ class SpectrogramPlugin extends BasePlugin<SpectrogramPluginEvents, SpectrogramP
     }
     this.fftSamples = options.fftSamples || 512
     this.height = options.height || 200
-    // Ensure 0 is preserved: auto-calc only when noverlap is null/undefined
-    this.noverlap = options.noverlap ?? null // Will be calculated later based on canvas size
+    this.noverlap = options.noverlap || null // Will be calculated later based on canvas size
     this.windowFunc = options.windowFunc || 'hann'
     this.alpha = options.alpha
 
@@ -992,7 +991,7 @@ class SpectrogramPlugin extends BasePlugin<SpectrogramPluginEvents, SpectrogramP
     const frequencies: Uint8Array[][] = []
 
     let noverlap = this.noverlap
-    if (noverlap == null) {
+    if (!noverlap) {
       const uniqueSamplesPerPx = buffer.length / this.canvas.width
       noverlap = Math.max(0, Math.round(fftSamples - uniqueSamplesPerPx))
     }

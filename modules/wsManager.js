@@ -188,39 +188,7 @@ export function initScrollSync({
     return;
   }
 
-  const sync = () => {
-    const left = source.scrollLeft;
-    if (target.scrollLeft !== left) target.scrollLeft = left;
-  };
-
-  source.addEventListener('scroll', sync);
-  // ensure axes are in sync when layout changes or plugin replaces content
-  window.addEventListener('resize', sync);
-  let ro, mo;
-  try {
-    ro = new ResizeObserver(sync);
-    ro.observe(source);
-    ro.observe(target);
-  } catch (e) {
-    // ResizeObserver not supported? ignore.
-  }
-  // mutation observer to detect DOM changes that may affect layout
-  try {
-    mo = new MutationObserver(sync);
-    mo.observe(source, { childList: true, subtree: true, attributes: true });
-  } catch (e) {
-    // ignore on older browsers
-  }
-
-  // initial sync
-  sync();
-
-  const destroy = () => {
-    try { source.removeEventListener('scroll', sync); } catch (e) {}
-    try { window.removeEventListener('resize', sync); } catch (e) {}
-    try { ro.disconnect(); } catch (e) {}
-    try { mo.disconnect(); } catch (e) {}
-  };
-
-  return { sync, destroy };
+  source.addEventListener('scroll', () => {
+    target.scrollLeft = source.scrollLeft;
+  });
 }
