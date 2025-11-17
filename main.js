@@ -610,10 +610,6 @@ const renderAxes = () => {
       autoIdControl?.updateMarkers();
     }
     updateProgressLine(getWavesurfer().getCurrentTime());
-    // Apply time axis translation to follow the current viewer scroll
-    if (timeAxis) {
-      timeAxis.style.transform = `translateX(-${viewer.scrollLeft}px)`;
-    }
   });
 };
 
@@ -683,11 +679,6 @@ viewer.addEventListener('scroll', () => {
   if (!ws) return;
   updateProgressLine(ws.getCurrentTime());
   autoIdControl?.updateMarkers();
-  // Ensure the time axis visually follows the spectrogram canvas scroll
-  if (timeAxis) {
-    // Use transform instead of scrollLeft to support overflow:hidden container
-    timeAxis.style.transform = `translateX(-${viewer.scrollLeft}px)`;
-  }
 });
 
 progressLineElem.addEventListener('mousedown', (e) => {

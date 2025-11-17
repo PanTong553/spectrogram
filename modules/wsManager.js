@@ -189,17 +189,6 @@ export function initScrollSync({
   }
 
   source.addEventListener('scroll', () => {
-    // If target supports scrolling, mirror scrollLeft; otherwise, try
-    // positioning the first child via transform (e.g., time axis). This
-    // ensures the axis follows the viewer scroll even when overflow is hidden.
-    try {
-      if (target.scrollWidth > target.clientWidth) {
-        target.scrollLeft = source.scrollLeft;
-      } else if (target.firstElementChild) {
-        target.firstElementChild.style.transform = `translateX(-${source.scrollLeft}px)`;
-      }
-    } catch (e) {
-      console.warn('[scrollSync] Failed to sync scroll:', e);
-    }
+    target.scrollLeft = source.scrollLeft;
   });
 }
