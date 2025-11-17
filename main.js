@@ -238,6 +238,63 @@ initWavesurfer({
   container,
   sampleRate: currentSampleRate,
 });
+// Ensure the wavesurfer shadow scroll element always uses overflow-x:hidden.
+// Some code (or the renderer) may set it to 'auto' during re-render/zoom;
+// install a guard that finds the shadow .scroll (wrapper.parentNode) and
+// forces overflow-x to hidden and observes mutations to revert any change.
+function installScrollHiddenGuard() {
+  const ws = getWavesurfer();
+  if (!ws || typeof ws.getWrapper !== 'function') return;
+
+  try {
+    const wrapper = ws.getWrapper();
+    if (!wrapper) return;
+    // the .scroll element is the wrapper's parent in the shadow DOM
+    const scrollEl = wrapper.parentNode;
+    if (!scrollEl) return;
+
+    // apply immediately
+    scrollEl.style.overflowX = 'hidden';
+
+    // observe attribute (style) changes and revert overflowX if changed
+    const mo = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (m.type === 'attributes' && m.attributeName === 'style') {
+          // if inline style changed and overflowX is not hidden, force it
+          if (scrollEl.style.overflowX !== 'hidden') {
+            scrollEl.style.overflowX = 'hidden';
+          }
+        }
+      }
+    });
+
+    mo.observe(scrollEl, { attributes: true, attributeFilter: ['style'] });
+
+    // re-apply on common wavesurfer events that trigger rerender
+    ['render', 'redraw', 'rendered', 'zoom'].forEach((ev) => {
+      try {
+        ws.on(ev, () => {
+          if (scrollEl.style.overflowX !== 'hidden') scrollEl.style.overflowX = 'hidden';
+        });
+      } catch (e) {
+        // ignore
+      }
+    });
+
+    // Also ensure on window resize
+    window.addEventListener('resize', () => {
+      if (scrollEl.style.overflowX !== 'hidden') scrollEl.style.overflowX = 'hidden';
+    });
+
+  } catch (err) {
+    // silent fail — defensive
+    console.error('installScrollHiddenGuard error', err);
+  }
+}
+
+// try to install immediately and also after small delay (in case wrapper not ready yet)
+installScrollHiddenGuard();
+setTimeout(installScrollHiddenGuard, 250);
 getWavesurfer().on('finish', () => {
   playPauseBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
   playPauseBtn.title = 'Play (Ctrl + P)';
