@@ -6,6 +6,7 @@ replacePlugin,
 createSpectrogramPlugin,
 getCurrentColorMap,
 initScrollSync,
+initWsScrollSync,
 } from './modules/wsManager.js';
 
 import { initZoomControls } from './modules/zoomControl.js';
@@ -843,6 +844,13 @@ scrollSourceId: 'viewer-container',
 scrollTargetId: 'time-axis-wrapper',
 });
 
+// Also sync time axis via wavesurfer scroll events so plugin-internal
+// scroll containers (e.g. spectrogram-flash plugin) still update the
+// time axis correctly after zoom or plugin replacement.
+initWsScrollSync({
+  scrollTargetId: 'time-axis-wrapper',
+});
+
 getWavesurfer().on('ready', () => {
     duration = getWavesurfer().getDuration();
     
@@ -1112,7 +1120,9 @@ function getAutoOverlapPercent(overriddenBufferLength = null) {
   if (bufferLength && canvasWidth && fft) {
     const samplesPerCol = bufferLength / canvasWidth;
     const noverlap = Math.max(0, Math.round(fft - samplesPerCol));
-    return Math.round((noverlap / fft) * 100);
+    const overlapPercent = Math.round((noverlap / fft) * 100);
+    // Ensure minimum overlap size is 5% in auto mode
+    return Math.max(5, overlapPercent);
   }
   return null;
 }
