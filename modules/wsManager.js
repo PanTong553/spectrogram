@@ -180,15 +180,54 @@ export function initScrollSync({
   scrollSourceId,
   scrollTargetId,
 }) {
-  const source = document.getElementById(scrollSourceId);
+  const defaultSource = document.getElementById(scrollSourceId);
   const target = document.getElementById(scrollTargetId);
+
+  // Determine actual scroll element to listen to: prefer WaveSurfer's
+  // internal `.scroll` container (inside its shadow root) when available.
+  let source = defaultSource;
+  try {
+    const ws = getWavesurfer();
+    if (ws && typeof ws.getWrapper === 'function') {
+      const wrapper = ws.getWrapper();
+      if (wrapper && wrapper.getRootNode) {
+        const root = wrapper.getRootNode();
+        const host = root && root.host;
+        if (host && host.shadowRoot) {
+          const sc = host.shadowRoot.querySelector('.scroll');
+          if (sc) {
+            source = sc;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    // ignore and fallback to provided source element
+  }
 
   if (!source || !target) {
     console.warn(`[scrollSync] One or both elements not found.`);
     return;
   }
 
-  source.addEventListener('scroll', () => {
+  let syncing = false;
+  const onSourceScroll = () => {
+    if (syncing) return;
+    syncing = true;
     target.scrollLeft = source.scrollLeft;
-  });
+    // schedule reset of syncing flag on next frame
+    requestAnimationFrame(() => (syncing = false));
+  };
+
+  source.addEventListener('scroll', onSourceScroll);
+
+  // Also mirror time-axis scroll back to waveform scroll (two-way sync)
+  // to keep both in sync if user scrolls the time axis.
+  const onTargetScroll = () => {
+    if (syncing) return;
+    syncing = true;
+    source.scrollLeft = target.scrollLeft;
+    requestAnimationFrame(() => (syncing = false));
+  };
+  target.addEventListener('scroll', onTargetScroll);
 }
