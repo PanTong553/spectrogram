@@ -610,6 +610,12 @@ const renderAxes = () => {
       autoIdControl?.updateMarkers();
     }
     updateProgressLine(getWavesurfer().getCurrentTime());
+    
+    // ✅ 同步 time-axis-wrapper 的 scrollLeft 以確保完全對齐
+    const timeAxisWrapper = document.getElementById('time-axis-wrapper');
+    if (timeAxisWrapper) {
+      timeAxisWrapper.scrollLeft = container.scrollLeft;
+    }
   });
 };
 

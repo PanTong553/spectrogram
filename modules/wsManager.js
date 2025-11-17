@@ -188,7 +188,22 @@ export function initScrollSync({
     return;
   }
 
+  let isScrolling = false;
+  
   source.addEventListener('scroll', () => {
+    if (isScrolling) return;
+    isScrolling = true;
     target.scrollLeft = source.scrollLeft;
+    // ✅ 確保同步完成後重置旗標，避免無限迴圈
+    requestAnimationFrame(() => { isScrolling = false; });
+  });
+  
+  // ✅ 同時監聽 target 的 scroll 事件以支持雙向同步
+  // 這可以防止用戶直接 scroll time-axis 導致與 spectrogram 不同步
+  target.addEventListener('scroll', () => {
+    if (isScrolling) return;
+    isScrolling = true;
+    source.scrollLeft = target.scrollLeft;
+    requestAnimationFrame(() => { isScrolling = false; });
   });
 }

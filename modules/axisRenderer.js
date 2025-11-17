@@ -55,6 +55,13 @@ export function drawTimeAxis({
   axisElement.appendChild(fragment);
   axisElement.style.width = `${totalWidth}px`;
   labelElement.textContent = step >= 1000 ? 'Time (s)' : 'Time (ms)';
+  
+  // ✅ 更新 time-axis-wrapper 的寬度以配合 zoom 變化
+  // 這確保 scroll bar 軌道長度與內容寬度保持一致
+  const timeAxisWrapper = axisElement.parentElement;
+  if (timeAxisWrapper && timeAxisWrapper.id === 'time-axis-wrapper') {
+    timeAxisWrapper.style.width = `${totalWidth}px`;
+  }
 }
 
 export function drawFrequencyGrid({
