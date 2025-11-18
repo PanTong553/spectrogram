@@ -386,6 +386,80 @@ class h extends s {
             this.emit("ready")
         }
     }
+
+    // Render given frequency data into this.canvas (which can be OffscreenCanvas)
+    // Returns a Promise that resolves when all createImageBitmap draw operations complete.
+    renderFrequenciesToCanvas(t) {
+        const self = this;
+        return new Promise((resolve) => {
+            // reuse most of drawSpectrogram logic but await the image bitmap promises
+            const dataArr = Array.isArray(t[0][0]) ? t : [t];
+            const height = this.height * dataArr.length;
+            // ensure canvas width is set externally; drawSpectrogram normally overwrites width
+            const width = this.canvas.width || this.getWidth();
+            this.canvas.width = width;
+            this.canvas.height = height;
+            const ctx = this.spectrCc;
+            const srHalf = this.buffer ? this.buffer.sampleRate / 2 : 0;
+            const fmin = this.frequencyMin;
+            const fmax = this.frequencyMax;
+
+            const promises = [];
+            for (let h = 0; h < dataArr.length; h++) {
+                const cols = this.resample(dataArr[h]);
+                const l = cols[0].length;
+                const img = new ImageData(width, l);
+                for (let x = 0; x < cols.length; x++) {
+                    for (let y = 0; y < cols[x].length; y++) {
+                        let idx = cols[x][y];
+                        if (idx < 0) idx = 0; else if (idx > 255) idx = 255;
+                        const cmapBase = idx * 4;
+                        const i = 4 * ((l - y - 1) * width + x);
+                        img.data[i] = this._colorMapUint[cmapBase];
+                        img.data[i + 1] = this._colorMapUint[cmapBase + 1];
+                        img.data[i + 2] = this._colorMapUint[cmapBase + 2];
+                        img.data[i + 3] = this._colorMapUint[cmapBase + 3];
+                    }
+                }
+                const u = this.hzToScale(fmin) / this.hzToScale(srHalf);
+                const p = this.hzToScale(fmax) / this.hzToScale(srHalf);
+                const start = Math.round(l * (1 - Math.min(1, p)));
+                const hgt = Math.round(l * (Math.min(1, p) - u));
+                // createImageBitmap returns a promise; push to array
+                promises.push(createImageBitmap(img, 0, start, width, hgt).then((bm) => {
+                    ctx.drawImage(bm, 0, this.height * (h + 1 - p / p), width, this.height * (p / p));
+                }).catch(() => {}));
+            }
+
+            Promise.all(promises).then(() => {
+                this.emit('ready');
+                resolve();
+            }).catch(() => {
+                this.emit('ready');
+                resolve();
+            });
+        });
+    }
+
+    // Apply a pre-rendered canvas (OffscreenCanvas or HTMLCanvasElement) onto this plugin canvas.
+    applyPreRenderedCanvas(preCanvas) {
+        try {
+            if (!preCanvas) return false;
+            // ensure main canvas exists
+            if (!this.canvas) this.createCanvas();
+            const dstCtx = this.spectrCc = this.canvas.getContext('2d');
+            // match size
+            this.canvas.width = preCanvas.width;
+            this.canvas.height = preCanvas.height;
+            // draw
+            dstCtx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            dstCtx.drawImage(preCanvas, 0, 0);
+            this.emit('ready');
+            return true;
+        } catch (err) {
+            return false;
+        }
+    }
     createFilterBank(t, e, s, r) {
                 // cache by scale name + params to avoid rebuilding
                 const cacheKey = `${this.scale}:${t}:${e}:${this.fftSamples}`;

@@ -2,6 +2,7 @@
 
 import { extractGuanoMetadata, parseGuanoMetadata } from './guanoReader.js';
 import { addFilesToList, getFileList, getCurrentIndex, setCurrentIndex, removeFilesByName, setFileMetadata, getTimeExpansionMode } from './fileState.js';
+import { preRenderSpectrogram, applyPreRenderedIfExists } from './wsManager.js';
 import { showMessageBox } from './messageBox.js';
 
 export async function getWavSampleRate(file) {
@@ -143,6 +144,13 @@ export function initFileLoader({
 
     await wavesurfer.load(fileUrl);
 
+    // If we have a pre-rendered spectrogram for this file (background), apply it immediately
+    try {
+      applyPreRenderedIfExists(file);
+    } catch (err) {
+      // ignore
+    }
+
     if (typeof onPluginReplaced === 'function') {
       onPluginReplaced();
     }
@@ -153,6 +161,18 @@ export function initFileLoader({
       onAfterLoad();
     }
     document.dispatchEvent(new Event('file-loaded'));
+    // kick off background pre-render for the next file (zoom level = 0, current settings)
+    try {
+      const files = getFileList();
+      const idx = getCurrentIndex();
+      if (files && idx >= 0 && idx < files.length - 1) {
+        const nextFile = files[idx + 1];
+        // start pre-render but don't await
+        preRenderSpectrogram(nextFile).catch(() => {});
+      }
+    } catch (err) {
+      // ignore
+    }
     
   }
 
