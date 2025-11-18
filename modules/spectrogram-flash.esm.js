@@ -139,9 +139,6 @@ function FFT(bufferSize, sampleRate, windowFunc, alpha) {
 
   this.peakBand = 0;
   this.peak = 0;
-  // Reusable buffers for calculateSpectrum
-  this._real = new Float32Array(bufferSize);
-  this._imag = new Float32Array(bufferSize);
 
   var i;
   switch (windowFunc) {
@@ -233,8 +230,8 @@ function FFT(bufferSize, sampleRate, windowFunc, alpha) {
       cosTable = this.cosTable,
       sinTable = this.sinTable,
       reverseTable = this.reverseTable,
-      real = this._real,
-      imag = this._imag,
+      real = new Float32Array(bufferSize),
+      imag = new Float32Array(bufferSize),
       bSi = 2 / this.bufferSize,
       sqrt = Math.sqrt,
       rval,
@@ -253,7 +250,7 @@ function FFT(bufferSize, sampleRate, windowFunc, alpha) {
         buffer.length;
     }
 
-    // Optimize window application - reuse array memory
+    // Optimize window application
     const windowValues = this.windowValues;
     for (var i = 0; i < bufferSize; i++) {
       const idx = reverseTable[i];
@@ -302,7 +299,7 @@ function FFT(bufferSize, sampleRate, windowFunc, alpha) {
       halfSize = halfSize << 1;
     }
 
-    const halfBufferSize = bufferSize >> 1;
+    const halfBufferSize = bufferSize / 2;
     for (var i = 0; i < halfBufferSize; i++) {
       rval = real[i];
       ival = imag[i];
@@ -390,11 +387,6 @@ class SpectrogramPlugin extends BasePlugin {
 
     this.createWrapper();
     this.createCanvas();
-    // cache for optimized structures
-    this._fft = null;
-    this._filterBankCache = new Map();
-    this._offscreenCanvas = document.createElement("canvas");
-    this._colorCache = null; // cached Uint8ClampedArray palette
   }
 
   onInit() {
@@ -530,37 +522,30 @@ class SpectrogramPlugin extends BasePlugin {
       spectrCc.fillRect(0, 0, width, height * frequenciesData.length);
     }
 
-    const off = this._offscreenCanvas;
-    const offCtx = off.getContext("2d");
     for (let c = 0; c < frequenciesData.length; c++) {
       const pixels = this.resample(frequenciesData[c]);
       const bitmapHeight = pixels[0].length;
       const imageData = new ImageData(width, bitmapHeight);
       const data = imageData.data;
 
-      // OPTIMIZATION: Color cache to avoid repeated lookups (cached on instance)
-      if (!this._colorCache) {
-        this._colorCache = new Uint8ClampedArray(this.colorMap.length * 4);
-        for (let i = 0; i < this.colorMap.length; i++) {
-          const color = this.colorMap[i];
-          const idx = i * 4;
-          this._colorCache[idx] = Math.round(color[0] * 255);
-          this._colorCache[idx + 1] = Math.round(color[1] * 255);
-          this._colorCache[idx + 2] = Math.round(color[2] * 255);
-          this._colorCache[idx + 3] = Math.round(color[3] * 255);
-        }
+      // OPTIMIZATION: Color cache to avoid repeated lookups
+      const colorCache = new Uint8ClampedArray(256 * 4);
+      for (let i = 0; i < 256; i++) {
+        const color = this.colorMap[i];
+        const idx = i * 4;
+        colorCache[idx] = Math.round(color[0] * 255);
+        colorCache[idx + 1] = Math.round(color[1] * 255);
+        colorCache[idx + 2] = Math.round(color[2] * 255);
+        colorCache[idx + 3] = Math.round(color[3] * 255);
       }
-      const colorCache = this._colorCache;
 
-      // Fill ImageData using cached colors (fast inner loop)
-      const w = width;
-      const h = bitmapHeight;
+      // Fill ImageData using cached colors
       for (let i = 0; i < pixels.length; i++) {
-        const col = pixels[i];
-        for (let j = 0; j < h; j++) {
-          const pixelValue = col[j];
-          const colorIdx = pixelValue << 2; // *4
-          const dataIdx = ((h - j - 1) * w + i) << 2;
+        for (let j = 0; j < pixels[i].length; j++) {
+          const pixelValue = pixels[i][j];
+          const colorIdx = pixelValue * 4;
+          const dataIdx = ((bitmapHeight - j - 1) * width + i) * 4;
+
           data[dataIdx] = colorCache[colorIdx];
           data[dataIdx + 1] = colorCache[colorIdx + 1];
           data[dataIdx + 2] = colorCache[colorIdx + 2];
@@ -572,16 +557,15 @@ class SpectrogramPlugin extends BasePlugin {
       const rMax = this.hzToScale(freqMax) / this.hzToScale(freqFrom);
       const rMax1 = Math.min(1, rMax);
 
-      // Draw using an offscreen canvas for better performance and synchronous flow
-      off.width = width;
-      off.height = bitmapHeight;
-      offCtx.putImageData(imageData, 0, 0);
-
-      const srcY = Math.round(bitmapHeight * (1 - rMax1));
-      const srcH = Math.round(bitmapHeight * Math.max(0, rMax1 - rMin));
-      const destY = height * (c + 1 - rMax1 / rMax);
-      const destH = (height * rMax1) / rMax;
-      spectrCc.drawImage(off, 0, srcY, width, srcH, 0, destY, width, destH);
+      createImageBitmap(
+        imageData,
+        0,
+        Math.round(bitmapHeight * (1 - rMax1)),
+        width,
+        Math.round(bitmapHeight * (rMax1 - rMin))
+      ).then((bitmap) => {
+        spectrCc.drawImage(bitmap, 0, height * (c + 1 - rMax1 / rMax), width, (height * rMax1) / rMax);
+      });
     }
 
     if (this.options.labels) {
@@ -605,14 +589,14 @@ class SpectrogramPlugin extends BasePlugin {
     const filterMin = hzToScale(0);
     const filterMax = hzToScale(sampleRate / 2);
     const scale = sampleRate / this.fftSamples;
-    const fftSamplesHalf = this.fftSamples >> 1;
+    const fftSamplesHalf = this.fftSamples / 2;
     const range = filterMax - filterMin;
     const reciprocalNumFilters = 1 / numFilters;
 
     const filterBank = [];
 
     for (let i = 0; i < numFilters; i++) {
-      const filter = new Float32Array(fftSamplesHalf + 1);
+      const filter = new Array(fftSamplesHalf + 1).fill(0);
 
       let hz = scaleToHz(filterMin + i * reciprocalNumFilters * range);
       let j = Math.floor(hz / scale);
@@ -720,15 +704,11 @@ class SpectrogramPlugin extends BasePlugin {
 
   applyFilterBank(fftPoints, filterBank) {
     const numFilters = filterBank.length;
-    const fftLen = fftPoints.length;
-    const logSpectrum = new Float32Array(numFilters);
+    const logSpectrum = Float32Array.from({ length: numFilters }, () => 0);
     for (let i = 0; i < numFilters; i++) {
-      const filter = filterBank[i];
-      let sum = 0.0;
-      for (let j = 0; j < fftLen; j++) {
-        sum += fftPoints[j] * filter[j];
+      for (let j = 0; j < fftPoints.length; j++) {
+        logSpectrum[i] += fftPoints[j] * filterBank[i][j];
       }
-      logSpectrum[i] = sum;
     }
     return logSpectrum;
   }
@@ -758,84 +738,47 @@ class SpectrogramPlugin extends BasePlugin {
       noverlap = Math.max(0, Math.round(fftSamples - uniqueSamplesPerPx));
     }
 
-    // Reuse FFT instance when possible to avoid repeated allocations
-    if (!this._fft || this._fft.bufferSize !== fftSamples || this._fft.sampleRate !== sampleRate) {
-      this._fft = new FFT(fftSamples, sampleRate, this.windowFunc, this.alpha);
-    }
-    const fft = this._fft;
+    const fft = new FFT(fftSamples, sampleRate, this.windowFunc, this.alpha);
 
     let filterBank;
     switch (this.scale) {
       case "mel":
-        {
-          const cacheKey = `mel|${this.numMelFilters}|${sampleRate}`;
-          if (this._filterBankCache.has(cacheKey)) {
-            filterBank = this._filterBankCache.get(cacheKey);
-          } else {
-            filterBank = this.createFilterBank(
-              this.numMelFilters,
-              sampleRate,
-              this.hzToMel.bind(this),
-              this.melToHz.bind(this)
-            );
-            this._filterBankCache.set(cacheKey, filterBank);
-          }
-        }
+        filterBank = this.createFilterBank(
+          this.numMelFilters,
+          sampleRate,
+          this.hzToMel.bind(this),
+          this.melToHz.bind(this)
+        );
         break;
       case "logarithmic":
-        {
-          const cacheKey = `log|${this.numLogFilters}|${sampleRate}`;
-          if (this._filterBankCache.has(cacheKey)) {
-            filterBank = this._filterBankCache.get(cacheKey);
-          } else {
-            filterBank = this.createFilterBank(
-              this.numLogFilters,
-              sampleRate,
-              this.hzToLog.bind(this),
-              this.logToHz.bind(this)
-            );
-            this._filterBankCache.set(cacheKey, filterBank);
-          }
-        }
+        filterBank = this.createFilterBank(
+          this.numLogFilters,
+          sampleRate,
+          this.hzToLog.bind(this),
+          this.logToHz.bind(this)
+        );
         break;
       case "bark":
-        {
-          const cacheKey = `bark|${this.numBarkFilters}|${sampleRate}`;
-          if (this._filterBankCache.has(cacheKey)) {
-            filterBank = this._filterBankCache.get(cacheKey);
-          } else {
-            filterBank = this.createFilterBank(
-              this.numBarkFilters,
-              sampleRate,
-              this.hzToBark.bind(this),
-              this.barkToHz.bind(this)
-            );
-            this._filterBankCache.set(cacheKey, filterBank);
-          }
-        }
+        filterBank = this.createFilterBank(
+          this.numBarkFilters,
+          sampleRate,
+          this.hzToBark.bind(this),
+          this.barkToHz.bind(this)
+        );
         break;
       case "erb":
-        {
-          const cacheKey = `erb|${this.numErbFilters}|${sampleRate}`;
-          if (this._filterBankCache.has(cacheKey)) {
-            filterBank = this._filterBankCache.get(cacheKey);
-          } else {
-            filterBank = this.createFilterBank(
-              this.numErbFilters,
-              sampleRate,
-              this.hzToErb.bind(this),
-              this.erbToHz.bind(this)
-            );
-            this._filterBankCache.set(cacheKey, filterBank);
-          }
-        }
+        filterBank = this.createFilterBank(
+          this.numErbFilters,
+          sampleRate,
+          this.hzToErb.bind(this),
+          this.erbToHz.bind(this)
+        );
         break;
     }
 
     // Pre-calculate constants for dB conversion
-    const fftSamplesHalf = fftSamples >> 1;
-    const gainDB = this.gainDB;
-    const gainDBNeg = -gainDB;
+    const fftSamplesHalf = fftSamples / 2;
+    const gainDBNeg = -this.gainDB;
     const gainDBNegRange = gainDBNeg - this.rangeDB;
     const rangeDBReciprocal = 255 / this.rangeDB;
 
@@ -845,7 +788,7 @@ class SpectrogramPlugin extends BasePlugin {
       let currentOffset = 0;
 
       while (currentOffset + fftSamples < channelData.length) {
-        const segment = channelData.subarray(currentOffset, currentOffset + fftSamples);
+        const segment = channelData.slice(currentOffset, currentOffset + fftSamples);
         const array = new Uint8Array(fftSamplesHalf);
         let spectrum = fft.calculateSpectrum(segment);
         if (filterBank) {
@@ -903,11 +846,9 @@ class SpectrogramPlugin extends BasePlugin {
     const labelIndex = 5 * (getMaxY / 256);
 
     const ctx = this.labelsEl.getContext("2d");
-    const dispScale = window.devicePixelRatio || 1;
-    this.labelsEl.width = bgWidth * dispScale;
+    const dispScale = window.devicePixelRatio;
     this.labelsEl.height = this.height * channels * dispScale;
-    // Reset transform to avoid stacking scale across re-renders
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.labelsEl.width = bgWidth * dispScale;
     ctx.scale(dispScale, dispScale);
 
     if (!ctx) {
@@ -953,32 +894,35 @@ class SpectrogramPlugin extends BasePlugin {
     const newMatrix = [];
     const oldMatrixLength = oldMatrix.length;
     const freqSize = oldMatrix[0].length;
-    // fast linear-interpolation resample: map each new column to an interpolated pair of old columns
-    if (columnsNumber <= 1 || oldMatrixLength <= 1) {
-      return oldMatrix.slice();
-    }
 
-    const scale = (oldMatrixLength - 1) / (columnsNumber - 1);
+    const oldPiece = 1 / oldMatrixLength;
+    const newPiece = 1 / columnsNumber;
+
+    const columnBuffer = new Float32Array(freqSize);
+
     for (let i = 0; i < columnsNumber; i++) {
-      const pos = i * scale;
-      const low = Math.floor(pos);
-      const high = Math.min(oldMatrixLength - 1, low + 1);
-      const frac = pos - low;
+      columnBuffer.fill(0);
 
-      const lowCol = oldMatrix[low];
-      const highCol = oldMatrix[high];
+      const newStart = i * newPiece;
+      const newEnd = newStart + newPiece;
+
+      for (let j = 0; j < oldMatrixLength; j++) {
+        const oldStart = j * oldPiece;
+        const oldEnd = oldStart + oldPiece;
+        const overlap = Math.max(0, Math.min(oldEnd, newEnd) - Math.max(oldStart, newStart));
+
+        if (overlap > 0) {
+          const weight = overlap / newPiece;
+          const oldData = oldMatrix[j];
+          for (let k = 0; k < freqSize; k++) {
+            columnBuffer[k] += weight * oldData[k];
+          }
+        }
+      }
+
       const intColumn = new Uint8Array(freqSize);
-
-      if (frac === 0) {
-        // copy values directly
-        for (let m = 0; m < freqSize; m++) {
-          intColumn[m] = lowCol[m];
-        }
-      } else {
-        const invFrac = 1 - frac;
-        for (let m = 0; m < freqSize; m++) {
-          intColumn[m] = Math.round(invFrac * lowCol[m] + frac * highCol[m]);
-        }
+      for (let m = 0; m < freqSize; m++) {
+        intColumn[m] = columnBuffer[m];
       }
       newMatrix.push(intColumn);
     }
