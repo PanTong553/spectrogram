@@ -100,12 +100,25 @@ const i = {
 };
 function s(t, e) {
     const i = e.xmlns ? document.createElementNS(e.xmlns, t) : document.createElement(t);
-    for (const [t,n] of Object.entries(e))
-        if ("children" === t)
-            for (const [t,n] of Object.entries(e))
-                "string" == typeof n ? i.appendChild(document.createTextNode(n)) : i.appendChild(s(t, n));
-        else
-            "style" === t ? Object.assign(i.style, n) : "textContent" === t ? i.textContent = n : i.setAttribute(t, n.toString());
+    const keys = Object.keys(e);
+    for (let k = 0, L = keys.length; k < L; k++) {
+        const key = keys[k];
+        const val = e[key];
+        if ("children" === key) {
+            const childKeys = Object.keys(val);
+            for (let ck = 0; ck < childKeys.length; ck++) {
+                const ckey = childKeys[ck];
+                const cval = val[ckey];
+                "string" == typeof cval ? i.appendChild(document.createTextNode(cval)) : i.appendChild(s(ckey, cval));
+            }
+        } else if ("style" === key) {
+            Object.assign(i.style, val);
+        } else if ("textContent" === key) {
+            i.textContent = val;
+        } else {
+            i.setAttribute(key, val.toString());
+        }
+    }
     return i
 }
 function n(t, e, i) {
@@ -312,10 +325,9 @@ class h extends e {
         )),
         !0 !== this.options.dragToSeek && "object" != typeof this.options.dragToSeek || this.initDrag(),
         this.scrollContainer.addEventListener("scroll", ( () => {
-            const {scrollLeft: t, scrollWidth: e, clientWidth: i} = this.scrollContainer
-              , s = t / e
-              , n = (t + i) / e;
-            this.emit("scroll", s, n, t, t + i)
+            const {scrollLeft: scrollPos, scrollWidth: totalWidth, clientWidth: viewWidth} = this.scrollContainer;
+            const ratio = 1 / totalWidth;
+            this.emit("scroll", scrollPos * ratio, (scrollPos + viewWidth) * ratio, scrollPos, scrollPos + viewWidth);
         }
         )),
         "function" == typeof ResizeObserver) {
@@ -359,7 +371,9 @@ class h extends e {
                       , h = s.clientY
                       , l = r - d
                       , m = h - c;
-                    if (u || Math.abs(l) > n || Math.abs(m) > n) {
+                    const absL = l < 0 ? -l : l;
+                    const absM = m < 0 ? -m : m;
+                    if (u || absL > n || absM > n) {
                         const s = t.getBoundingClientRect()
                           , {left: n, top: o} = s;
                         u || (null == i || i(d - n, c - o),
@@ -520,12 +534,10 @@ class h extends e {
           , s = e.height * (window.devicePixelRatio || 1)
           , n = i.createLinearGradient(0, 0, 0, s)
           , r = 1 / (t.length - 1);
-        return t.forEach(( (t, e) => {
-            const i = e * r;
-            n.addColorStop(i, t)
+        for (let idx = 0; idx < t.length; idx++) {
+            n.addColorStop(idx * r, t[idx]);
         }
-        )),
-        n
+        return n
     }
     getPixelRatio() {
         return Math.max(1, window.devicePixelRatio || 1)
@@ -681,12 +693,18 @@ class h extends e {
         u(f),
         u(f + 1),
         p > 1) {
+            let nodeCount = 0;
+            const cacheKeys = Object.keys(c);
+            for (let i = 0; i < cacheKeys.length; i++) nodeCount++;
             const t = this.on("scroll", ( () => {
                 const {scrollLeft: t} = this.scrollContainer
                   , e = Math.floor(t / l * p);
-                Object.keys(c).length > h.MAX_NODES && (n.innerHTML = "",
-                r.innerHTML = "",
-                c = {}),
+                if (nodeCount > h.MAX_NODES) {
+                    n.innerHTML = "";
+                    r.innerHTML = "";
+                    c = {};
+                    nodeCount = 0;
+                }
                 u(e - 1),
                 u(e),
                 u(e + 1)
@@ -775,34 +793,31 @@ class h extends e {
         this.reRender()
     }
     scrollIntoView(t, e=!1) {
-        const {scrollLeft: i, scrollWidth: s, clientWidth: n} = this.scrollContainer
-          , r = t * s
-          , o = i
-          , a = i + n
-          , h = n / 2;
+        const {scrollLeft: i, scrollWidth: s, clientWidth: n} = this.scrollContainer;
+        const r = t * s;
+        const h = n / 2;
         if (this.isDragging) {
-            const t = 30;
-            r + t > a ? this.scrollContainer.scrollLeft += t : r - t < o && (this.scrollContainer.scrollLeft -= t)
+            const delta = 30;
+            r + delta > i + n ? this.scrollContainer.scrollLeft += delta : r - delta < i && (this.scrollContainer.scrollLeft -= delta);
         } else {
-            (r < o || r > a) && (this.scrollContainer.scrollLeft = r - (this.options.autoCenter ? h : 0));
-            const t = r - i - h;
-            e && this.options.autoCenter && t > 0 && (this.scrollContainer.scrollLeft += Math.min(t, 10))
+            (r < i || r > i + n) && (this.scrollContainer.scrollLeft = r - (this.options.autoCenter ? h : 0));
+            const offset = r - i - h;
+            e && this.options.autoCenter && offset > 0 && (this.scrollContainer.scrollLeft += Math.min(offset, 10));
         }
-        {
-            const t = this.scrollContainer.scrollLeft
-              , e = t / s
-              , i = (t + n) / s;
-            this.emit("scroll", e, i, t, t + n)
-        }
+        const scrollPos = this.scrollContainer.scrollLeft;
+        const scrollStart = scrollPos / s;
+        const scrollEnd = (scrollPos + n) / s;
+        this.emit("scroll", scrollStart, scrollEnd, scrollPos, scrollPos + n);
     }
     renderProgress(t, e) {
         if (isNaN(t))
             return;
         const i = 100 * t;
+        const roundedPct = Math.round(i);
         this.canvasWrapper.style.clipPath = `polygon(${i}% 0, 100% 0, 100% 100%, ${i}% 100%)`,
         this.progressWrapper.style.width = `${i}%`,
         this.cursor.style.left = `${i}%`,
-        this.cursor.style.transform = `translateX(-${100 === Math.round(i) ? this.options.cursorWidth : 0}px)`,
+        this.cursor.style.transform = `translateX(-${100 === roundedPct ? this.options.cursorWidth : 0}px)`,
         this.isScrollable && this.options.autoScroll && this.scrollIntoView(t, e)
     }
     exportImage(e, i, s) {
@@ -811,16 +826,21 @@ class h extends e {
             if (!t.length)
                 throw new Error("No waveform data");
             if ("dataURL" === s) {
-                const s = Array.from(t).map((t => t.toDataURL(e, i)));
-                return Promise.resolve(s)
-            }
-            return Promise.all(Array.from(t).map((t => new Promise(( (s, n) => {
-                t.toBlob((t => {
-                    t ? s(t) : n(new Error("Could not export image"))
+                const result = [];
+                for (let idx = 0; idx < t.length; idx++) {
+                    result.push(t[idx].toDataURL(e, i));
                 }
-                ), e, i)
+                return Promise.resolve(result);
             }
-            )))))
+            const promises = [];
+            for (let idx = 0; idx < t.length; idx++) {
+                promises.push(new Promise((resolve, reject) => {
+                    t[idx].toBlob((blob) => {
+                        blob ? resolve(blob) : reject(new Error("Could not export image"));
+                    }, e, i);
+                }));
+            }
+            return Promise.all(promises);
         }
         ))
     }
