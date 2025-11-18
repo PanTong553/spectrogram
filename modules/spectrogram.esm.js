@@ -477,14 +477,18 @@ class h extends s {
         return t
     }
     applyFilterBank(t, e) {
-        const s = e.length
-          , r = Float32Array.from({
-            length: s
-        }, ( () => 0));
-        for (let i = 0; i < s; i++)
-            for (let s = 0; s < t.length; s++)
-                r[i] += t[s] * e[i][s];
-        return r
+        const numFilters = e.length;
+        const numBins = t.length;
+        const out = new Float32Array(numFilters);
+        // iterate over input bins first to reduce repeated loads of t[s]
+        for (let bin = 0; bin < numBins; bin++) {
+            const v = t[bin];
+            if (v === 0) continue;
+            for (let filt = 0; filt < numFilters; filt++) {
+                out[filt] += v * e[filt][bin];
+            }
+        }
+        return out
     }
     getWidth() {
         return this.wavesurfer.getWrapper().offsetWidth
@@ -593,25 +597,28 @@ class h extends s {
             }
     }
     resample(t) {
-        const outW = this.getWidth()
-          , out = []
-          , invIn = 1 / t.length;
+        const outW = this.getWidth();
+        const out = [];
+        const inLen = t.length;
+        const srcLen = t[0] ? t[0].length : 0;
 
-        const cacheKey = `${t.length}:${outW}`;
+        const cacheKey = `${inLen}:${outW}`;
         let mapping = this._resampleCache[cacheKey];
         if (!mapping) {
             mapping = new Array(outW);
             const invOut = 1 / outW;
+            // For each output column determine the small range of input indices that overlap
             for (let a = 0; a < outW; a++) {
+                const o = a * invOut;
+                const l = o + invOut;
+                const start = Math.max(0, Math.floor(o * inLen));
+                const end = Math.min(inLen - 1, Math.floor(l * inLen));
                 const contrib = [];
-                for (let n = 0; n < t.length; n++) {
-                    const s = n * invIn;
-                    const h = s + invIn;
-                    const o = a * invOut;
-                    const l = o + invOut;
+                for (let n = start; n <= end; n++) {
+                    const s = n / inLen;
+                    const h = s + 1 / inLen;
                     const c = Math.max(0, Math.min(h, l) - Math.max(s, o));
-                    if (c > 0)
-                        contrib.push([n, c / invOut]);
+                    if (c > 0) contrib.push([n, c / invOut]);
                 }
                 mapping[a] = contrib;
             }
@@ -619,21 +626,28 @@ class h extends s {
         }
 
         for (let a = 0; a < outW; a++) {
-            const accum = new Array(t[0].length);
             const contrib = mapping[a];
+            // fast path: single contributor with weight ~1 → copy row
+            if (contrib.length === 1 && Math.abs(contrib[0][1] - 1) < 1e-9) {
+                out.push(new Uint8Array(t[contrib[0][0]]));
+                continue;
+            }
+
+            const accum = new Float32Array(srcLen);
             for (let j = 0; j < contrib.length; j++) {
                 const nIdx = contrib[j][0];
                 const weight = contrib[j][1];
                 const src = t[nIdx];
-                for (let u = 0; u < src.length; u++) {
-                    if (accum[u] == null)
-                        accum[u] = 0;
+                for (let u = 0; u < srcLen; u++) {
                     accum[u] += weight * src[u];
                 }
             }
-            const outArr = new Uint8Array(t[0].length);
-            for (let o = 0; o < t[0].length; o++)
-                outArr[o] = accum[o];
+            const outArr = new Uint8Array(srcLen);
+            for (let o = 0; o < srcLen; o++) {
+                let v = Math.round(accum[o]);
+                if (v < 0) v = 0; else if (v > 255) v = 255;
+                outArr[o] = v;
+            }
             out.push(outArr);
         }
         return out
