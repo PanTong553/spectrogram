@@ -543,26 +543,29 @@ class h extends e {
           , m = a / (c + u) / o
           , f = p && "roundRect"in i ? "roundRect" : "rect";
         i.beginPath();
-        let g = 0
-          , v = 0
-          , b = 0;
-        for (let t = 0; t <= o; t++) {
-            const o = Math.round(t * m);
-            if (o > g) {
-                const t = Math.round(v * l * s)
-                  , n = t + Math.round(b * l * s) || 1;
-                let r = l - t;
-                "top" === e.barAlign ? r = 0 : "bottom" === e.barAlign && (r = h - n),
-                i[f](g * (c + u), r, c, n, p),
-                g = o,
-                v = 0,
-                b = 0
-            }
-            const a = Math.abs(n[t] || 0)
-              , d = Math.abs(r[t] || 0);
-            a > v && (v = a),
-            d > b && (b = d)
-        }
+                let g = 0
+                    , v = 0
+                    , b = 0;
+                const nArr = n, rArr = r, nLen = o;
+                for (let idx = 0; idx <= nLen; idx++) {
+                        const oIdx = Math.round(idx * m);
+                        if (oIdx > g) {
+                                const tVal = Math.round(v * l * s)
+                                    , nVal = tVal + Math.round(b * l * s) || 1;
+                                let topPos = l - tVal;
+                                "top" === e.barAlign ? topPos = 0 : "bottom" === e.barAlign && (topPos = h - nVal),
+                                i[f](g * (c + u), topPos, c, nVal, p),
+                                g = oIdx,
+                                v = 0,
+                                b = 0
+                        }
+                        const aVal = idx < nLen ? nArr[idx] : 0;
+                        const dVal = idx < nLen ? rArr[idx] : 0;
+                        const absA = aVal < 0 ? -aVal : aVal;
+                        const absD = dVal < 0 ? -dVal : dVal;
+                        if (absA > v) v = absA;
+                        if (absD > b) b = absD;
+                }
         i.fill(),
         i.closePath()
     }
@@ -574,20 +577,22 @@ class h extends e {
               , a = o / 2
               , h = i.canvas.width / r;
             i.moveTo(0, a);
-            let l = 0
-              , d = 0;
-            for (let t = 0; t <= r; t++) {
-                const r = Math.round(t * h);
-                if (r > l) {
-                    const t = a + (Math.round(d * a * s) || 1) * (0 === e ? -1 : 1);
-                    i.lineTo(l, t),
-                    l = r,
-                    d = 0
-                }
-                const o = Math.abs(n[t] || 0);
-                o > d && (d = o)
-            }
-            i.lineTo(l, a)
+                        let l = 0
+                            , d = 0;
+                        const arr = n, arrLen = r;
+                        for (let idx = 0; idx <= arrLen; idx++) {
+                                const rounded = Math.round(idx * h);
+                                if (rounded > l) {
+                                        const val = a + (Math.round(d * a * s) || 1) * (0 === e ? -1 : 1);
+                                        i.lineTo(l, val),
+                                        l = rounded,
+                                        d = 0
+                                }
+                                const sample = idx < arrLen ? arr[idx] : 0;
+                                const absSample = sample < 0 ? -sample : sample;
+                                if (absSample > d) d = absSample;
+                        }
+                        i.lineTo(l, a)
         }
         ;
         i.beginPath(),
@@ -602,8 +607,14 @@ class h extends e {
             return void e.renderFunction(t, i);
         let s = e.barHeight || 1;
         if (e.normalize) {
-            const e = Array.from(t[0]).reduce(( (t, e) => Math.max(t, Math.abs(e))), 0);
-            s = e ? 1 / e : 1
+            const ch = t[0];
+            let maxAbs = 0;
+            for (let k = 0, L = ch.length; k < L; k++) {
+                const v = ch[k];
+                const av = v < 0 ? -v : v;
+                if (av > maxAbs) maxAbs = av;
+            }
+            s = maxAbs ? 1 / maxAbs : 1;
         }
         e.barWidth || e.barGap || e.barAlign ? this.renderBarWaveform(t, e, i, s) : this.renderLineWaveform(t, e, i, s)
     }
@@ -651,12 +662,11 @@ class h extends e {
               , a = Math.min(l - o, d);
             if (a <= 0)
                 return;
-            const h = t.map((t => {
-                const e = Math.floor(o / l * t.length)
-                  , i = Math.floor((o + a) / l * t.length);
-                return t.slice(e, i)
-            }
-            ));
+            const h = t.map((chan => {
+                const start = Math.floor(o / l * chan.length);
+                const end = Math.floor((o + a) / l * chan.length);
+                return chan.subarray(start, end);
+            }));
             this.renderSingleCanvas(h, e, a, s, o, n, r)
         }
           , p = Math.ceil(l / d);
@@ -1260,24 +1270,26 @@ class u extends a {
     exportPeaks({channels: t=2, maxLength: e=8e3, precision: i=1e4}={}) {
         if (!this.decodedData)
             throw new Error("The audio has not been decoded yet");
-        const s = Math.min(t, this.decodedData.numberOfChannels)
-          , n = [];
-        for (let t = 0; t < s; t++) {
-            const s = this.decodedData.getChannelData(t)
-              , r = []
-              , o = s.length / e;
-            for (let t = 0; t < e; t++) {
-                const e = s.slice(Math.floor(t * o), Math.ceil((t + 1) * o));
-                let n = 0;
-                for (let t = 0; t < e.length; t++) {
-                    const i = e[t];
-                    Math.abs(i) > Math.abs(n) && (n = i)
+        const chans = Math.min(t, this.decodedData.numberOfChannels);
+        const result = [];
+        for (let ch = 0; ch < chans; ch++) {
+            const samples = this.decodedData.getChannelData(ch);
+            const peaks = new Array(e);
+            const blockSize = samples.length / e;
+            for (let p = 0; p < e; p++) {
+                const start = Math.floor(p * blockSize);
+                const end = Math.min(Math.ceil((p + 1) * blockSize), samples.length);
+                let maxVal = 0;
+                for (let sIdx = start; sIdx < end; sIdx++) {
+                    const v = samples[sIdx];
+                    const av = v < 0 ? -v : v;
+                    if (av > maxVal) maxVal = av;
                 }
-                r.push(Math.round(n * i) / i)
+                peaks[p] = Math.round(maxVal * i) / i;
             }
-            n.push(r)
+            result.push(peaks);
         }
-        return n
+        return result;
     }
     getDuration() {
         let t = super.getDuration() || 0;
