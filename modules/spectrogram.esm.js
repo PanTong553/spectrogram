@@ -155,9 +155,10 @@ function a(t, e, s, r) {
         a <<= 1,
         n >>= 1
     }
+    const twoPi = 2 * Math.PI;
     for (i = 0; i < t; i++)
-        this.sinTable[i] = Math.sin(-Math.PI / i),
-        this.cosTable[i] = Math.cos(-Math.PI / i);
+        this.sinTable[i] = Math.sin(-Math.PI * twoPi / t / i),
+        this.cosTable[i] = Math.cos(-Math.PI * twoPi / t / i);
     // allocate reusable temporary arrays to avoid per-call allocations
     this._o = new Float32Array(t);
     this._l = new Float32Array(t);
@@ -362,22 +363,36 @@ class h extends s {
             for (let h = 0; h < t.length; h++) {
                 const o = this.resample(t[h])
                   , l = o[0].length
-                  , c = new ImageData(r,l);
-                for (let t = 0; t < o.length; t++)
-                    for (let e = 0; e < o[t].length; e++) {
-                        let idx = o[t][e];
-                        if (idx < 0) idx = 0; else if (idx > 255) idx = 255;
-                        const cmapBase = idx * 4;
-                        const i = 4 * ((l - e - 1) * r + t);
-                        c.data[i] = this._colorMapUint[cmapBase];
-                        c.data[i + 1] = this._colorMapUint[cmapBase + 1];
-                        c.data[i + 2] = this._colorMapUint[cmapBase + 2];
-                        c.data[i + 3] = this._colorMapUint[cmapBase + 3];
-                    }
+                  , c = new ImageData(r, l);
+                
+                // Optimize: Pre-compute scaling factors
                 const u = this.hzToScale(a) / this.hzToScale(i)
                   , f = this.hzToScale(n) / this.hzToScale(i)
                   , p = Math.min(1, f);
-                createImageBitmap(c, 0, Math.round(l * (1 - p)), r, Math.round(l * (p - u))).then((t => {
+                const pixelStart = Math.round(l * (1 - p));
+                const pixelHeight = Math.round(l * (p - u));
+                const imgBitX = 0;
+                const imgBitY = pixelStart;
+                const imgBitWidth = r;
+                const imgBitHeight = pixelHeight;
+                
+                // Single pass to fill ImageData
+                const data = c.data;
+                for (let t = 0; t < o.length; t++) {
+                    const srcCol = o[t];
+                    for (let e = 0; e < l; e++) {
+                        let idx = srcCol[e];
+                        if (idx < 0) idx = 0; else if (idx > 255) idx = 255;
+                        const cmapBase = idx * 4;
+                        const i = 4 * ((l - e - 1) * r + t);
+                        data[i] = this._colorMapUint[cmapBase];
+                        data[i + 1] = this._colorMapUint[cmapBase + 1];
+                        data[i + 2] = this._colorMapUint[cmapBase + 2];
+                        data[i + 3] = this._colorMapUint[cmapBase + 3];
+                    }
+                }
+                
+                createImageBitmap(c, imgBitX, imgBitY, imgBitWidth, imgBitHeight).then((t => {
                     e.drawImage(t, 0, s * (h + 1 - p / f), r, s * p / f)
                 }
                 ))
@@ -396,15 +411,18 @@ class h extends s {
                     , a = s(e / 2)
                     , n = Array.from({
                         length: t
-                }, ( () => Array(this.fftSamples / 2 + 1).fill(0)))
+                }, ( () => new Float32Array(this.fftSamples / 2 + 1)))
                     , h = e / this.fftSamples;
+                    
+                const freqRange = a - i;
+                const invT = 1 / t;
         for (let e = 0; e < t; e++) {
-            let s = r(i + e / t * (a - i))
+            let s = i + e * invT * freqRange
               , o = Math.floor(s / h)
               , l = o * h
               , c = (s - l) / ((o + 1) * h - l);
-            n[e][o] = 1 - c,
-            n[e][o + 1] = c
+            n[e][o] = 1 - c;
+            n[e][o + 1] = c;
         }
         this._filterBankCache[cacheKey] = n;
         return n
@@ -478,12 +496,14 @@ class h extends s {
     }
     applyFilterBank(t, e) {
         const s = e.length
-          , r = Float32Array.from({
-            length: s
-        }, ( () => 0));
-        for (let i = 0; i < s; i++)
-            for (let s = 0; s < t.length; s++)
-                r[i] += t[s] * e[i][s];
+          , r = new Float32Array(s);
+        for (let i = 0; i < s; i++) {
+            let sum = 0;
+            const filterRow = e[i];
+            for (let j = 0; j < t.length; j++)
+                sum += t[j] * filterRow[j];
+            r[i] = sum;
+        }
         return r
     }
     getWidth() {
@@ -505,6 +525,15 @@ class h extends s {
             o = Math.max(0, Math.round(r - e))
         }
         const l = new a(r,n,this.windowFunc,this.alpha);
+        
+        // Pre-compute dB conversion parameters
+        const dbGain = -this.gainDB;
+        const dbRange = this.rangeDB;
+        const dbMin = dbGain - dbRange;
+        const dbMax = -dbGain;
+        const dbScale = 255 / dbRange;
+        const dbOffset = 256;
+        
         let c;
         switch (this.scale) {
         case "mel":
@@ -530,8 +559,13 @@ class h extends s {
                 c && (n = this.applyFilterBank(n, c));
                 for (let t = 0; t < r / 2; t++) {
                     const s = n[t] > 1e-12 ? n[t] : 1e-12
-                      , r = 20 * Math.log10(s);
-                    r < -this.gainDB - this.rangeDB ? e[t] = 0 : r > -this.gainDB ? e[t] = 255 : e[t] = (r + this.gainDB) / this.rangeDB * 255 + 256
+                      , rVal = 20 * Math.log10(s);
+                    if (rVal < dbMin)
+                        e[t] = 0;
+                    else if (rVal > dbMax)
+                        e[t] = 255;
+                    else
+                        e[t] = (rVal - dbGain) * dbScale + 0.5 | 0;
                 }
                 i.push(e),
                 a += r - o
@@ -618,22 +652,21 @@ class h extends s {
             this._resampleCache[cacheKey] = mapping;
         }
 
+        const inLen = t[0].length;
         for (let a = 0; a < outW; a++) {
-            const accum = new Array(t[0].length);
+            const outArr = new Uint8Array(inLen);
             const contrib = mapping[a];
-            for (let j = 0; j < contrib.length; j++) {
-                const nIdx = contrib[j][0];
-                const weight = contrib[j][1];
-                const src = t[nIdx];
-                for (let u = 0; u < src.length; u++) {
-                    if (accum[u] == null)
-                        accum[u] = 0;
-                    accum[u] += weight * src[u];
+            
+            // Use a single pass with direct accumulation into output
+            for (let u = 0; u < inLen; u++) {
+                let accum = 0;
+                for (let j = 0; j < contrib.length; j++) {
+                    const nIdx = contrib[j][0];
+                    const weight = contrib[j][1];
+                    accum += weight * t[nIdx][u];
                 }
+                outArr[u] = accum;
             }
-            const outArr = new Uint8Array(t[0].length);
-            for (let o = 0; o < t[0].length; o++)
-                outArr[o] = accum[o];
             out.push(outArr);
         }
         return out
