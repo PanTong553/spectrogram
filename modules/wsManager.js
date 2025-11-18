@@ -163,6 +163,8 @@ export async function preRenderSpectrogram(fileOrUrl, widthOverride) {
     };
 
     const spec = Spectrogram.create(baseOptions);
+    // ensure options exists on the instance (some code reads this.options.splitChannels)
+    spec.options = Object.assign({}, baseOptions);
 
     // create offscreen canvas (or fallback to element canvas)
     const container = document.getElementById('spectrogram-only');
@@ -179,7 +181,7 @@ export async function preRenderSpectrogram(fileOrUrl, widthOverride) {
     // attach offscreen canvas and dummy wavesurfer wrapper for width queries
     spec.canvas = off;
     spec.spectrCc = off.getContext('2d');
-    spec.wavesurfer = { getWrapper: () => ({ offsetWidth: width }) };
+    spec.wavesurfer = { getWrapper: () => ({ offsetWidth: width }), options: { splitChannels: false } };
     spec.buffer = decoded;
 
     // compute frequencies and render to offscreen canvas
