@@ -1,4 +1,18 @@
-function t(t, e, s, r) {
+/**
+ * Optimized Spectrogram Plugin with KissFFT integration
+ * Features:
+ * - KissFFT-based FFT computation (faster than JS Cooley-Tukey)
+ * - Reusable FFT buffers (pre-allocation)
+ * - Filter bank caching
+ * - Resample mapping caching
+ * - Pre-computed colorMap (Uint8 format)
+ * - Fallback to JS FFT if needed
+ */
+
+import { KissFFT } from './kissFFT.js';
+
+// Promise utility
+function promiseHandler(t, e, s, r) {
     return new (s || (s = Promise))((function(i, a) {
         function n(t) {
             try {
@@ -26,8 +40,11 @@ function t(t, e, s, r) {
     }
     ))
 }
+
 "function" == typeof SuppressedError && SuppressedError;
-class e {
+
+// Event emitter
+class EventEmitter {
     constructor() {
         this.listeners = {}
     }
@@ -61,7 +78,8 @@ class e {
         this.listeners[t] && this.listeners[t].forEach((t => t(...e)))
     }
 }
-class s extends e {
+
+class BasePlugin extends EventEmitter {
     constructor(t) {
         super(),
         this.subscriptions = [],
@@ -77,107 +95,202 @@ class s extends e {
         this.subscriptions.forEach((t => t()))
     }
 }
-function r(t, e) {
+
+// DOM helper
+function createElement(t, e) {
     const s = e.xmlns ? document.createElementNS(e.xmlns, t) : document.createElement(t);
     for (const [t,i] of Object.entries(e))
         if ("children" === t)
             for (const [t,i] of Object.entries(e))
-                "string" == typeof i ? s.appendChild(document.createTextNode(i)) : s.appendChild(r(t, i));
+                "string" == typeof i ? s.appendChild(document.createTextNode(i)) : s.appendChild(createElement(t, i));
         else
             "style" === t ? Object.assign(s.style, i) : "textContent" === t ? s.textContent = i : s.setAttribute(t, i.toString());
     return s
 }
-function i(t, e, s) {
-    const i = r(t, e || {});
+
+function createAndAppend(t, e, s) {
+    const i = createElement(t, e || {});
     return null == s || s.appendChild(i),
     i
 }
-function a(t, e, s, r) {
-    switch (this.bufferSize = t,
-    this.sampleRate = e,
-    this.bandwidth = 2 / t * (e / 2),
-    this.sinTable = new Float32Array(t),
-    this.cosTable = new Float32Array(t),
-    this.windowValues = new Float32Array(t),
-    this.reverseTable = new Uint32Array(t),
-    this.peakBand = 0,
-    this.peak = 0,
-    s) {
-    case "bartlett":
-        for (i = 0; i < t; i++)
-            this.windowValues[i] = 2 / (t - 1) * ((t - 1) / 2 - Math.abs(i - (t - 1) / 2));
-        break;
-    case "bartlettHann":
-        for (i = 0; i < t; i++)
-            this.windowValues[i] = .62 - .48 * Math.abs(i / (t - 1) - .5) - .38 * Math.cos(2 * Math.PI * i / (t - 1));
-        break;
-    case "blackman":
-        for (r = r || .16,
-        i = 0; i < t; i++)
-            this.windowValues[i] = (1 - r) / 2 - .5 * Math.cos(2 * Math.PI * i / (t - 1)) + r / 2 * Math.cos(4 * Math.PI * i / (t - 1));
-        break;
-    case "cosine":
-        for (i = 0; i < t; i++)
-            this.windowValues[i] = Math.cos(Math.PI * i / (t - 1) - Math.PI / 2);
-        break;
-    case "gauss":
-        for (r = r || .25,
-        i = 0; i < t; i++)
-            this.windowValues[i] = Math.pow(Math.E, -.5 * Math.pow((i - (t - 1) / 2) / (r * (t - 1) / 2), 2));
-        break;
-    case "hamming":
-        for (i = 0; i < t; i++)
-            this.windowValues[i] = .54 - .46 * Math.cos(2 * Math.PI * i / (t - 1));
-        break;
-    case "hann":
-    case void 0:
-        for (i = 0; i < t; i++)
-            this.windowValues[i] = .5 * (1 - Math.cos(2 * Math.PI * i / (t - 1)));
-        break;
-    case "lanczoz":
-        for (i = 0; i < t; i++)
-            this.windowValues[i] = Math.sin(Math.PI * (2 * i / (t - 1) - 1)) / (Math.PI * (2 * i / (t - 1) - 1));
-        break;
-    case "rectangular":
-        for (i = 0; i < t; i++)
-            this.windowValues[i] = 1;
-        break;
-    case "triangular":
-        for (i = 0; i < t; i++)
-            this.windowValues[i] = 2 / t * (t / 2 - Math.abs(i - (t - 1) / 2));
-        break;
-    default:
-        throw Error("No such window function '" + s + "'")
-    }
-    for (var i, a = 1, n = t >> 1; a < t; ) {
-        for (i = 0; i < a; i++)
-            this.reverseTable[i + a] = this.reverseTable[i] + n;
-        a <<= 1,
-        n >>= 1
-    }
-    for (i = 0; i < t; i++)
-        this.sinTable[i] = Math.sin(-Math.PI / i),
-        this.cosTable[i] = Math.cos(-Math.PI / i);
-    // allocate reusable temporary arrays to avoid per-call allocations
-    this._o = new Float32Array(t);
-    this._l = new Float32Array(t);
-    this._f = new Float32Array(t >> 1);
 
-    this.calculateSpectrum = function(t) {
-        var e, s, r, i = this.bufferSize, a = this.cosTable, n = this.sinTable, h = this.reverseTable, o = this._o, l = this._l, c = 2 / this.bufferSize, u = Math.sqrt, f = this._f, p = Math.floor(Math.log(i) / Math.LN2);
+/**
+ * FFT wrapper with KissFFT and JS fallback
+ */
+class FFTWrapper {
+    constructor(bufferSize, sampleRate, windowFunc = "hann", alpha = null) {
+        this.bufferSize = bufferSize;
+        this.sampleRate = sampleRate;
+        this.bandwidth = 2 / bufferSize * (sampleRate / 2);
+        
+        // Pre-compute window values
+        this.windowValues = new Float32Array(bufferSize);
+        this.computeWindow(windowFunc, alpha);
+        
+        // Try to initialize KissFFT, fallback to JS FFT
+        try {
+            this.kissFFT = new KissFFT(bufferSize);
+            this.useKissFFT = true;
+            // Pre-allocate output buffers for KissFFT
+            this.kissReal = new Float32Array(bufferSize);
+            this.kissImag = new Float32Array(bufferSize);
+        } catch (e) {
+            console.warn('KissFFT initialization failed, falling back to JS FFT:', e);
+            this.useKissFFT = false;
+            // Initialize JS FFT tables
+            this.initJSFFT(bufferSize);
+        }
+        
+        // Shared output magnitude spectrum
+        this.spectrum = new Float32Array(bufferSize / 2);
+        this.peakBand = 0;
+        this.peak = 0;
+    }
+
+    computeWindow(windowType, alpha) {
+        const N = this.bufferSize;
+        const win = this.windowValues;
+        
+        switch(windowType) {
+            case "bartlett":
+                for (let i = 0; i < N; i++)
+                    win[i] = 2 / (N - 1) * ((N - 1) / 2 - Math.abs(i - (N - 1) / 2));
+                break;
+            case "bartlettHann":
+                for (let i = 0; i < N; i++)
+                    win[i] = .62 - .48 * Math.abs(i / (N - 1) - .5) - .38 * Math.cos(2 * Math.PI * i / (N - 1));
+                break;
+            case "blackman":
+                const alphaBlack = alpha || .16;
+                for (let i = 0; i < N; i++)
+                    win[i] = (1 - alphaBlack) / 2 - .5 * Math.cos(2 * Math.PI * i / (N - 1)) + alphaBlack / 2 * Math.cos(4 * Math.PI * i / (N - 1));
+                break;
+            case "cosine":
+                for (let i = 0; i < N; i++)
+                    win[i] = Math.cos(Math.PI * i / (N - 1) - Math.PI / 2);
+                break;
+            case "gauss":
+                const alphaGauss = alpha || .25;
+                for (let i = 0; i < N; i++)
+                    win[i] = Math.pow(Math.E, -.5 * Math.pow((i - (N - 1) / 2) / (alphaGauss * (N - 1) / 2), 2));
+                break;
+            case "hamming":
+                for (let i = 0; i < N; i++)
+                    win[i] = .54 - .46 * Math.cos(2 * Math.PI * i / (N - 1));
+                break;
+            case "hann":
+            case undefined:
+                for (let i = 0; i < N; i++)
+                    win[i] = .5 * (1 - Math.cos(2 * Math.PI * i / (N - 1)));
+                break;
+            case "lanczoz":
+                for (let i = 0; i < N; i++)
+                    win[i] = Math.sin(Math.PI * (2 * i / (N - 1) - 1)) / (Math.PI * (2 * i / (N - 1) - 1));
+                break;
+            case "rectangular":
+                for (let i = 0; i < N; i++)
+                    win[i] = 1;
+                break;
+            case "triangular":
+                for (let i = 0; i < N; i++)
+                    win[i] = 2 / N * (N / 2 - Math.abs(i - (N - 1) / 2));
+                break;
+            default:
+                throw Error("No such window function '" + windowType + "'")
+        }
+    }
+
+    initJSFFT(bufferSize) {
+        // Pre-compute sine and cosine tables for JS FFT fallback
+        this.sinTable = new Float32Array(bufferSize);
+        this.cosTable = new Float32Array(bufferSize);
+        this.reverseTable = new Uint32Array(bufferSize);
+        
+        for (let i = 0; i < bufferSize; i++) {
+            this.sinTable[i] = Math.sin(-Math.PI / i);
+            this.cosTable[i] = Math.cos(-Math.PI / i);
+        }
+        
+        // Bit-reversal table
+        let a = 1, n = bufferSize >> 1;
+        while (a < bufferSize) {
+            for (let i = 0; i < a; i++)
+                this.reverseTable[i + a] = this.reverseTable[i] + n;
+            a <<= 1;
+            n >>= 1;
+        }
+        
+        // Pre-allocate JS FFT buffers
+        this._o = new Float32Array(bufferSize);
+        this._l = new Float32Array(bufferSize);
+    }
+
+    calculateSpectrum(input) {
+        if (this.useKissFFT) {
+            return this.calculateSpectrumKissFFT(input);
+        } else {
+            return this.calculateSpectrumJS(input);
+        }
+    }
+
+    calculateSpectrumKissFFT(input) {
+        const N = this.bufferSize;
+        const windowed = new Float32Array(N);
+        
+        // Apply window
+        for (let i = 0; i < N; i++) {
+            windowed[i] = input[i] * this.windowValues[i];
+        }
+        
+        // Compute FFT using KissFFT
+        this.kissFFT.forward(windowed, this.kissReal, this.kissImag);
+        
+        // Compute magnitude spectrum
+        const spectrum = this.spectrum;
+        const scale = 2.0 / N;
+        for (let i = 0; i < N / 2; i++) {
+            const re = this.kissReal[i];
+            const im = this.kissImag[i];
+            const mag = Math.sqrt(re * re + im * im) * scale;
+            
+            if (mag > this.peak) {
+                this.peakBand = i;
+                this.peak = mag;
+            }
+            spectrum[i] = mag;
+        }
+        
+        return spectrum;
+    }
+
+    calculateSpectrumJS(input) {
+        const i = this.bufferSize;
+        const a = this.cosTable;
+        const n = this.sinTable;
+        const h = this.reverseTable;
+        const o = this._o;
+        const l = this._l;
+        const c = 2 / this.bufferSize;
+        const u = Math.sqrt;
+        const f = this.spectrum;
+        const p = Math.floor(Math.log(i) / Math.LN2);
+        
         if (Math.pow(2, p) !== i)
             throw "Invalid buffer size, must be a power of 2.";
-        if (i !== t.length)
-            throw "Supplied buffer is not the same size as defined FFT. FFT Size: " + i + " Buffer Size: " + t.length;
-        for (var d, w, g, b, M, m, y, v, T = 1, k = 0; k < i; k++)
-            o[k] = t[h[k]] * this.windowValues[h[k]],
+        if (i !== input.length)
+            throw "Supplied buffer is not the same size as defined FFT. FFT Size: " + i + " Buffer Size: " + input.length;
+        
+        let k, d, w, g, b, M, m, y, v, T = 1;
+        for (k = 0; k < i; k++)
+            o[k] = input[h[k]] * this.windowValues[h[k]],
             l[k] = 0;
-        for (; T < i; ) {
+        
+        while (T < i) {
             d = a[T],
             w = n[T],
             g = 1,
             b = 0;
-            for (var z = 0; z < T; z++) {
+            for (let z = 0; z < T; z++) {
                 for (k = z; k < i; )
                     m = g * o[M = k + T] - b * l[M],
                     y = g * l[M] + b * o[M],
@@ -191,25 +304,40 @@ function a(t, e, s, r) {
             }
             T <<= 1
         }
+        
+        let r;
         k = 0;
-        for (var F = i / 2; k < F; k++)
-            (r = c * u((e = o[k]) * e + (s = l[k]) * s)) > this.peak && (this.peakBand = k,
-            this.peak = r),
+        for (let F = i / 2; k < F; k++) {
+            const e = o[k];
+            const s = l[k];
+            r = c * u(e * e + s * s);
+            if (r > this.peak) {
+                this.peakBand = k;
+                this.peak = r;
+            }
             f[k] = r;
-        return f
+        }
+        
+        return f;
     }
 }
-const n = 1e3 * Math.log(10) / 107.939;
-class h extends s {
+
+// ERB scale constant
+const erbConstant = 1e3 * Math.log(10) / 107.939;
+
+class Spectrogram extends BasePlugin {
     static create(t) {
-        return new h(t || {})
+        return new Spectrogram(t || {})
     }
+
     constructor(t) {
-        var e, s;
-        if (super(t),
-        this.frequenciesDataUrl = t.frequenciesDataUrl,
-        this.container = "string" == typeof t.container ? document.querySelector(t.container) : t.container,
-        t.colorMap && "string" != typeof t.colorMap) {
+        super(t);
+        
+        this.frequenciesDataUrl = t.frequenciesDataUrl;
+        this.container = "string" == typeof t.container ? document.querySelector(t.container) : t.container;
+        
+        // Initialize colorMap
+        if (t.colorMap && "string" != typeof t.colorMap) {
             if (t.colorMap.length < 256)
                 throw new Error("Colormap must contain 256 elements");
             for (let e = 0; e < t.colorMap.length; e++) {
@@ -217,49 +345,61 @@ class h extends s {
                     throw new Error("ColorMap entries must contain 4 values")
             }
             this.colorMap = t.colorMap
-        } else
-            switch (this.colorMap = t.colorMap || "roseus",
-            this.colorMap) {
+        } else {
+            const colorMapName = t.colorMap || "roseus";
+            this.colorMap = this.generateColorMap(colorMapName);
+        }
+        
+        // Configuration
+        this.fftSamples = t.fftSamples || 512;
+        this.height = t.height || 200;
+        this.noverlap = t.noverlap || null;
+        this.windowFunc = t.windowFunc || "hann";
+        this.alpha = t.alpha;
+        this.frequencyMin = t.frequencyMin || 0;
+        this.frequencyMax = t.frequencyMax || 0;
+        this.gainDB = null !== t.gainDB && void 0 !== t.gainDB ? t.gainDB : 20;
+        this.rangeDB = null !== t.rangeDB && void 0 !== t.rangeDB ? t.rangeDB : 80;
+        this.scale = t.scale || "mel";
+        this.numMelFilters = this.fftSamples / 2;
+        this.numLogFilters = this.fftSamples / 2;
+        this.numBarkFilters = this.fftSamples / 2;
+        this.numErbFilters = this.fftSamples / 2;
+        
+        // Cache for filter banks
+        this._filterBankCache = {};
+        this._resampleCache = {};
+        
+        // Pre-compute colorMap as Uint8 for faster rendering
+        this._colorMapUint = new Uint8ClampedArray(256 * 4);
+        this.precomputeColorMapUint();
+        
+        this.createWrapper();
+        this.createCanvas();
+    }
+
+    generateColorMap(name) {
+        const map = [];
+        switch(name) {
             case "gray":
-                this.colorMap = [];
                 for (let t = 0; t < 256; t++) {
                     const e = (255 - t) / 256;
-                    this.colorMap.push([e, e, e, 1])
+                    map.push([e, e, e, 1])
                 }
                 break;
             case "igray":
-                this.colorMap = [];
                 for (let t = 0; t < 256; t++) {
                     const e = t / 256;
-                    this.colorMap.push([e, e, e, 1])
+                    map.push([e, e, e, 1])
                 }
                 break;
             default:
-                throw Error("No such colormap '" + this.colorMap + "'")
-            }
-        this.fftSamples = t.fftSamples || 512,
-        this.height = t.height || 200,
-        this.noverlap = t.noverlap || null,
-        this.windowFunc = t.windowFunc || "hann",
-        this.alpha = t.alpha,
-        this.frequencyMin = t.frequencyMin || 0,
-        this.frequencyMax = t.frequencyMax || 0,
-        this.gainDB = null !== (e = t.gainDB) && void 0 !== e ? e : 20,
-        this.rangeDB = null !== (s = t.rangeDB) && void 0 !== s ? s : 80,
-        this.scale = t.scale || "mel",
-        this.numMelFilters = this.fftSamples / 2,
-        this.numLogFilters = this.fftSamples / 2,
-        this.numBarkFilters = this.fftSamples / 2,
-        this.numErbFilters = this.fftSamples / 2,
-        this.createWrapper(),
-        this.createCanvas();
+                throw Error("No such colormap '" + name + "'")
+        }
+        return map;
+    }
 
-        // cache for filter banks to avoid rebuilding on each render
-        this._filterBankCache = {};
-        // cache for resample mappings keyed by inputLen:outputWidth
-        this._resampleCache = {};
-        // precomputed uint8 colormap (RGBA 0-255)
-        this._colorMapUint = new Uint8ClampedArray(256 * 4);
+    precomputeColorMapUint() {
         if (this.colorMap && this._colorMapUint) {
             for (let ii = 0; ii < 256; ii++) {
                 const cc = this.colorMap[ii] || [0, 0, 0, 1];
@@ -270,29 +410,31 @@ class h extends s {
             }
         }
     }
+
     onInit() {
-        this.container = this.container || this.wavesurfer.getWrapper(),
-        this.container.appendChild(this.wrapper),
+        this.container = this.container || this.wavesurfer.getWrapper();
+        this.container.appendChild(this.wrapper);
         this.wavesurfer.options.fillParent && Object.assign(this.wrapper.style, {
             width: "100%",
             overflowX: "hidden",
             overflowY: "hidden"
-        }),
-        this.subscriptions.push(this.wavesurfer.on("redraw", ( () => this.render())))
+        });
+        this.subscriptions.push(this.wavesurfer.on("redraw", ( () => this.render())));
     }
+
     destroy() {
-        this.unAll(),
-        this.wavesurfer.un("ready", this._onReady),
-        this.wavesurfer.un("redraw", this._onRender),
-        this.wavesurfer = null,
-        this.util = null,
-        this.options = null,
-        this.wrapper && (this.wrapper.remove(),
-        this.wrapper = null),
+        this.unAll();
+        this.wavesurfer.un("ready", this._onReady);
+        this.wavesurfer.un("redraw", this._onRender);
+        this.wavesurfer = null;
+        this.util = null;
+        this.options = null;
+        this.wrapper && (this.wrapper.remove(), this.wrapper = null);
         super.destroy()
     }
+
     loadFrequenciesData(e) {
-        return t(this, void 0, void 0, (function*() {
+        return promiseHandler(this, void 0, void 0, (function*() {
             const t = yield fetch(e);
             if (!t.ok)
                 throw new Error("Unable to fetch frequencies data");
@@ -301,15 +443,16 @@ class h extends s {
         }
         ))
     }
+
     createWrapper() {
-        this.wrapper = i("div", {
+        this.wrapper = createAndAppend("div", {
             style: {
                 display: "block",
                 position: "relative",
                 userSelect: "none"
             }
-        }),
-        this.options.labels && (this.labelsEl = i("canvas", {
+        });
+        this.options.labels && (this.labelsEl = createAndAppend("canvas", {
             part: "spec-labels",
             style: {
                 position: "absolute",
@@ -317,11 +460,12 @@ class h extends s {
                 width: "55px",
                 height: "100%"
             }
-        }, this.wrapper)),
+        }, this.wrapper));
         this.wrapper.addEventListener("click", this._onWrapperClick)
     }
+
     createCanvas() {
-        this.canvas = i("canvas", {
+        this.canvas = createAndAppend("canvas", {
             style: {
                 position: "absolute",
                 left: 0,
@@ -330,11 +474,12 @@ class h extends s {
                 height: "100%",
                 zIndex: 4
             }
-        }, this.wrapper),
+        }, this.wrapper);
         this.spectrCc = this.canvas.getContext("2d")
     }
+
     render() {
-        var t;
+        let t;
         if (this.frequenciesDataUrl)
             this.loadFrequenciesData(this.frequenciesDataUrl);
         else {
@@ -342,27 +487,32 @@ class h extends s {
             e && this.drawSpectrogram(this.getFrequencies(e))
         }
     }
+
     drawSpectrogram(t) {
-        isNaN(t[0][0]) || (t = [t]),
-        this.wrapper.style.height = this.height * t.length + "px",
-        this.canvas.width = this.getWidth(),
+        isNaN(t[0][0]) || (t = [t]);
+        this.wrapper.style.height = this.height * t.length + "px";
+        this.canvas.width = this.getWidth();
         this.canvas.height = this.height * t.length;
-        const e = this.spectrCc
-          , s = this.height
-          , r = this.getWidth()
-          , i = this.buffer.sampleRate / 2
-          , a = this.frequencyMin
-          , n = this.frequencyMax;
+        
+        const e = this.spectrCc;
+        const s = this.height;
+        const r = this.getWidth();
+        const i = this.buffer.sampleRate / 2;
+        const a = this.frequencyMin;
+        const n = this.frequencyMax;
+        
         if (e) {
             if (n > i) {
                 const i = this.colorMap[this.colorMap.length - 1];
-                e.fillStyle = `rgba(${i[0]}, ${i[1]}, ${i[2]}, ${i[3]})`,
+                e.fillStyle = `rgba(${i[0]}, ${i[1]}, ${i[2]}, ${i[3]})`;
                 e.fillRect(0, 0, r, s * t.length)
             }
+            
             for (let h = 0; h < t.length; h++) {
-                const o = this.resample(t[h])
-                  , l = o[0].length
-                  , c = new ImageData(r,l);
+                const o = this.resample(t[h]);
+                const l = o[0].length;
+                const c = new ImageData(r, l);
+                
                 for (let t = 0; t < o.length; t++)
                     for (let e = 0; e < o[t].length; e++) {
                         let idx = o[t][e];
@@ -374,138 +524,127 @@ class h extends s {
                         c.data[i + 2] = this._colorMapUint[cmapBase + 2];
                         c.data[i + 3] = this._colorMapUint[cmapBase + 3];
                     }
-                const u = this.hzToScale(a) / this.hzToScale(i)
-                  , f = this.hzToScale(n) / this.hzToScale(i)
-                  , p = Math.min(1, f);
+                
+                const u = this.hzToScale(a) / this.hzToScale(i);
+                const f = this.hzToScale(n) / this.hzToScale(i);
+                const p = Math.min(1, f);
+                
                 createImageBitmap(c, 0, Math.round(l * (1 - p)), r, Math.round(l * (p - u))).then((t => {
                     e.drawImage(t, 0, s * (h + 1 - p / f), r, s * p / f)
-                }
-                ))
+                }))
             }
-            this.options.labels && this.loadLabels(this.options.labelsBackground, "12px", "12px", "", this.options.labelsColor, this.options.labelsHzColor || this.options.labelsColor, "center", "#specLabels", t.length),
+            
+            this.options.labels && this.loadLabels(this.options.labelsBackground, "12px", "12px", "", this.options.labelsColor, this.options.labelsHzColor || this.options.labelsColor, "center", "#specLabels", t.length);
             this.emit("ready")
         }
     }
-    createFilterBank(t, e, s, r) {
-                // cache by scale name + params to avoid rebuilding
-                const cacheKey = `${this.scale}:${t}:${e}:${this.fftSamples}`;
-                if (this._filterBankCache[cacheKey])
-                        return this._filterBankCache[cacheKey];
 
-                const i = s(0)
-                    , a = s(e / 2)
-                    , n = Array.from({
-                        length: t
-                }, ( () => Array(this.fftSamples / 2 + 1).fill(0)))
-                    , h = e / this.fftSamples;
+    createFilterBank(t, e, s, r) {
+        const cacheKey = `${this.scale}:${t}:${e}:${this.fftSamples}`;
+        if (this._filterBankCache[cacheKey])
+            return this._filterBankCache[cacheKey];
+
+        const i = s(0);
+        const a = s(e / 2);
+        const n = Array.from({ length: t }, ( () => Array(this.fftSamples / 2 + 1).fill(0)));
+        const h = e / this.fftSamples;
+        
         for (let e = 0; e < t; e++) {
-            let s = r(i + e / t * (a - i))
-              , o = Math.floor(s / h)
-              , l = o * h
-              , c = (s - l) / ((o + 1) * h - l);
-            n[e][o] = 1 - c,
+            let s = r(i + e / t * (a - i));
+            let o = Math.floor(s / h);
+            let l = o * h;
+            let c = (s - l) / ((o + 1) * h - l);
+            n[e][o] = 1 - c;
             n[e][o + 1] = c
         }
+        
         this._filterBankCache[cacheKey] = n;
-        return n
+        return n;
     }
-    hzToMel(t) {
-        return 2595 * Math.log10(1 + t / 700)
-    }
-    melToHz(t) {
-        return 700 * (Math.pow(10, t / 2595) - 1)
-    }
-    createMelFilterBank(t, e) {
-        return this.createFilterBank(t, e, this.hzToMel, this.melToHz)
-    }
-    hzToLog(t) {
-        return Math.log10(Math.max(1, t))
-    }
-    logToHz(t) {
-        return Math.pow(10, t)
-    }
-    createLogFilterBank(t, e) {
-        return this.createFilterBank(t, e, this.hzToLog, this.logToHz)
-    }
+
+    hzToMel(t) { return 2595 * Math.log10(1 + t / 700) }
+    melToHz(t) { return 700 * (Math.pow(10, t / 2595) - 1) }
+    createMelFilterBank(t, e) { return this.createFilterBank(t, e, this.hzToMel, this.melToHz) }
+    
+    hzToLog(t) { return Math.log10(Math.max(1, t)) }
+    logToHz(t) { return Math.pow(10, t) }
+    createLogFilterBank(t, e) { return this.createFilterBank(t, e, this.hzToLog, this.logToHz) }
+    
     hzToBark(t) {
         let e = 26.81 * t / (1960 + t) - .53;
         return e < 2 && (e += .15 * (2 - e)),
         e > 20.1 && (e += .22 * (e - 20.1)),
         e
     }
+    
     barkToHz(t) {
         return t < 2 && (t = (t - .3) / .85),
         t > 20.1 && (t = (t + 4.422) / 1.22),
         (t + .53) / (26.28 - t) * 1960
     }
-    createBarkFilterBank(t, e) {
-        return this.createFilterBank(t, e, this.hzToBark, this.barkToHz)
-    }
-    hzToErb(t) {
-        return n * Math.log10(1 + .00437 * t)
-    }
-    erbToHz(t) {
-        return (Math.pow(10, t / n) - 1) / .00437
-    }
-    createErbFilterBank(t, e) {
-        return this.createFilterBank(t, e, this.hzToErb, this.erbToHz)
-    }
+    
+    createBarkFilterBank(t, e) { return this.createFilterBank(t, e, this.hzToBark, this.barkToHz) }
+    
+    hzToErb(t) { return erbConstant * Math.log10(1 + .00437 * t) }
+    erbToHz(t) { return (Math.pow(10, t / erbConstant) - 1) / .00437 }
+    createErbFilterBank(t, e) { return this.createFilterBank(t, e, this.hzToErb, this.erbToHz) }
+    
     hzToScale(t) {
         switch (this.scale) {
-        case "mel":
-            return this.hzToMel(t);
-        case "logarithmic":
-            return this.hzToLog(t);
-        case "bark":
-            return this.hzToBark(t);
-        case "erb":
-            return this.hzToErb(t)
+        case "mel": return this.hzToMel(t);
+        case "logarithmic": return this.hzToLog(t);
+        case "bark": return this.hzToBark(t);
+        case "erb": return this.hzToErb(t);
         }
         return t
     }
+    
     scaleToHz(t) {
         switch (this.scale) {
-        case "mel":
-            return this.melToHz(t);
-        case "logarithmic":
-            return this.logToHz(t);
-        case "bark":
-            return this.barkToHz(t);
-        case "erb":
-            return this.erbToHz(t)
+        case "mel": return this.melToHz(t);
+        case "logarithmic": return this.logToHz(t);
+        case "bark": return this.barkToHz(t);
+        case "erb": return this.erbToHz(t);
         }
         return t
     }
+
     applyFilterBank(t, e) {
-        const s = e.length
-          , r = Float32Array.from({
-            length: s
-        }, ( () => 0));
+        const s = e.length;
+        const r = Float32Array.from({ length: s }, ( () => 0));
+        
         for (let i = 0; i < s; i++)
             for (let s = 0; s < t.length; s++)
                 r[i] += t[s] * e[i][s];
+        
         return r
     }
+
     getWidth() {
         return this.wavesurfer.getWrapper().offsetWidth
     }
+
     getFrequencies(t) {
-        var e, s;
-        const r = this.fftSamples
-          , i = (null !== (e = this.options.splitChannels) && void 0 !== e ? e : null === (s = this.wavesurfer) || void 0 === s ? void 0 : s.options.splitChannels) ? t.numberOfChannels : 1;
-        if (this.frequencyMax = this.frequencyMax || t.sampleRate / 2,
-        !t)
+        let e, s;
+        const r = this.fftSamples;
+        const i = (null !== (e = this.options.splitChannels) && void 0 !== e ? e : null === (s = this.wavesurfer) || void 0 === s ? void 0 : s.options.splitChannels) ? t.numberOfChannels : 1;
+        
+        if (this.frequencyMax = this.frequencyMax || t.sampleRate / 2, !t)
             return;
+        
         this.buffer = t;
-        const n = t.sampleRate
-          , h = [];
+        const n = t.sampleRate;
+        const h = [];
         let o = this.noverlap;
+        
         if (!o) {
             const e = t.length / this.canvas.width;
             o = Math.max(0, Math.round(r - e))
         }
-        const l = new a(r,n,this.windowFunc,this.alpha);
+        
+        const l = new FFTWrapper(r, n, this.windowFunc, this.alpha);
         let c;
+        
         switch (this.scale) {
         case "mel":
             c = this.createFilterBank(this.numMelFilters, n, this.hzToMel, this.melToHz);
@@ -517,54 +656,70 @@ class h extends s {
             c = this.createFilterBank(this.numBarkFilters, n, this.hzToBark, this.barkToHz);
             break;
         case "erb":
-            c = this.createFilterBank(this.numErbFilters, n, this.hzToErb, this.erbToHz)
+            c = this.createFilterBank(this.numErbFilters, n, this.hzToErb, this.erbToHz);
         }
+        
         for (let e = 0; e < i; e++) {
-            const s = t.getChannelData(e)
-              , i = [];
+            const s = t.getChannelData(e);
+            const i = [];
             let a = 0;
-                        for (; a + r < s.length; ) {
-                                const tSlice = s.subarray(a, a + r)
-                                    , e = new Uint8Array(r / 2);
-                                let n = l.calculateSpectrum(tSlice);
-                c && (n = this.applyFilterBank(n, c));
+            
+            while (a + r < s.length) {
+                const tSlice = s.subarray(a, a + r);
+                const e = new Uint8Array(r / 2);
+                let n = l.calculateSpectrum(tSlice);
+                
+                if (c) n = this.applyFilterBank(n, c);
+                
                 for (let t = 0; t < r / 2; t++) {
-                    const s = n[t] > 1e-12 ? n[t] : 1e-12
-                      , r = 20 * Math.log10(s);
-                    r < -this.gainDB - this.rangeDB ? e[t] = 0 : r > -this.gainDB ? e[t] = 255 : e[t] = (r + this.gainDB) / this.rangeDB * 255 + 256
+                    const s = n[t] > 1e-12 ? n[t] : 1e-12;
+                    const r = 20 * Math.log10(s);
+                    if (r < -this.gainDB - this.rangeDB)
+                        e[t] = 0;
+                    else if (r > -this.gainDB)
+                        e[t] = 255;
+                    else
+                        e[t] = (r + this.gainDB) / this.rangeDB * 255 + 256;
                 }
-                i.push(e),
-                a += r - o
+                
+                i.push(e);
+                a += r - o;
             }
-            h.push(i)
+            
+            h.push(i);
         }
-        return h
+        
+        return h;
     }
+
     freqType(t) {
         return t >= 1e3 ? (t / 1e3).toFixed(1) : Math.round(t)
     }
+
     unitType(t) {
         return t >= 1e3 ? "kHz" : "Hz"
     }
+
     getLabelFrequency(t, e) {
-        const s = this.hzToScale(this.frequencyMin)
-          , r = this.hzToScale(this.frequencyMax);
+        const s = this.hzToScale(this.frequencyMin);
+        const r = this.hzToScale(this.frequencyMax);
         return this.scaleToHz(s + t / e * (r - s))
     }
+
     loadLabels(t, e, s, r, i, a, n, h, o) {
-        t = t || "rgba(68,68,68,0)",
-        e = e || "12px",
-        s = s || "12px",
-        r = r || "Helvetica",
-        i = i || "#fff",
-        a = a || "#fff",
+        t = t || "rgba(68,68,68,0)";
+        e = e || "12px";
+        s = s || "12px";
+        r = r || "Helvetica";
+        i = i || "#fff";
+        a = a || "#fff";
         n = n || "center";
-        const l = this.height || 512
-          , c = l / 256 * 5;
-        this.frequencyMin;
-        this.frequencyMax;
-        const u = this.labelsEl.getContext("2d")
-          , f = window.devicePixelRatio;
+        
+        const l = this.height || 512;
+        const c = l / 256 * 5;
+        const u = this.labelsEl.getContext("2d");
+        const f = window.devicePixelRatio;
+        
         if (this.labelsEl.height = this.height * o * f,
         this.labelsEl.width = 55 * f,
         u.scale(f, f),
@@ -575,30 +730,32 @@ class h extends s {
                 u.fillRect(0, h * l, 55, (1 + h) * l),
                 u.fill(),
                 o = 0; o <= c; o++) {
-                    u.textAlign = n,
+                    u.textAlign = n;
                     u.textBaseline = "middle";
-                    const t = this.getLabelFrequency(o, c)
-                      , f = this.freqType(t)
-                      , p = this.unitType(t)
-                      , d = 16;
+                    const t = this.getLabelFrequency(o, c);
+                    const f = this.freqType(t);
+                    const p = this.unitType(t);
+                    const d = 16;
                     let w = (1 + h) * l - o / c * l;
-                    w = Math.min(Math.max(w, h * l + 10), (1 + h) * l - 10),
-                    u.fillStyle = a,
-                    u.font = s + " " + r,
-                    u.fillText(p, d + 24, w),
-                    u.fillStyle = i,
-                    u.font = e + " " + r,
-                    u.fillText(f, d, w)
+                    w = Math.min(Math.max(w, h * l + 10), (1 + h) * l - 10);
+                    u.fillStyle = a;
+                    u.font = s + " " + r;
+                    u.fillText(p, d + 24, w);
+                    u.fillStyle = i;
+                    u.font = e + " " + r;
+                    u.fillText(f, d, w);
                 }
             }
     }
+
     resample(t) {
-        const outW = this.getWidth()
-          , out = []
-          , invIn = 1 / t.length;
+        const outW = this.getWidth();
+        const out = [];
+        const invIn = 1 / t.length;
 
         const cacheKey = `${t.length}:${outW}`;
         let mapping = this._resampleCache[cacheKey];
+        
         if (!mapping) {
             mapping = new Array(outW);
             const invOut = 1 / outW;
@@ -636,7 +793,9 @@ class h extends s {
                 outArr[o] = accum[o];
             out.push(outArr);
         }
-        return out
+        
+        return out;
     }
 }
-export {h as default};
+
+export { Spectrogram as default };
