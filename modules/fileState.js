@@ -5,6 +5,8 @@ let currentIndex = -1;
 let fileIcons = {}; // { index: { trash: bool, star: bool, question: bool } }
 let fileNotes = {}; // { index: string }
 let fileMetadata = {}; // { index: { date, time, latitude, longitude } }
+// store pre-decoded AudioBuffer for quick spectrogram rendering
+let preloadedDecoded = {}; // { index: AudioBuffer }
 
 export function setFileList(list, index = 0) {
   fileList = list;
@@ -84,6 +86,23 @@ export function setFileMetadata(index, data) {
 
 export function getFileMetadata(index) {
   return fileMetadata[index] || { date: '', time: '', latitude: '', longitude: '' };
+}
+
+export function setPreloadedDecoded(index, audioBuffer) {
+  if (index == null) return;
+  preloadedDecoded[index] = audioBuffer;
+}
+
+export function getPreloadedDecoded(index) {
+  return preloadedDecoded[index] || null;
+}
+
+export function clearPreloadedDecoded(index) {
+  if (typeof index === 'number') {
+    delete preloadedDecoded[index];
+  } else {
+    preloadedDecoded = {};
+  }
 }
 
 // Return the number of files marked with the trash flag

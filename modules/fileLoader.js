@@ -1,7 +1,7 @@
 // modules/fileLoader.js
 
 import { extractGuanoMetadata, parseGuanoMetadata } from './guanoReader.js';
-import { addFilesToList, getFileList, getCurrentIndex, setCurrentIndex, removeFilesByName, setFileMetadata, getTimeExpansionMode } from './fileState.js';
+import { addFilesToList, getFileList, getCurrentIndex, setCurrentIndex, removeFilesByName, setFileMetadata, getTimeExpansionMode, setPreloadedDecoded, getPreloadedDecoded, clearPreloadedDecoded } from './fileState.js';
 import { showMessageBox } from './messageBox.js';
 
 export async function getWavSampleRate(file) {
@@ -137,10 +137,28 @@ export function initFileLoader({
       guanoOutput.textContent = '(Error reading GUANO metadata)';
     }
 
+    // try to use a pre-decoded buffer for faster initial spectrogram rendering
+    const files = getFileList();
+    const fileIndex = files.findIndex(f => f === file);
+    const predecoded = fileIndex >= 0 ? getPreloadedDecoded(fileIndex) : null;
+
+    if (predecoded && wavesurfer && wavesurfer.renderer && typeof wavesurfer.renderer.render === 'function') {
+      try {
+        // set decodedData and render immediately (fast UI) while we still load audio for playback
+        wavesurfer.decodedData = predecoded;
+        try { wavesurfer.emit && wavesurfer.emit('decode', wavesurfer.getDuration && wavesurfer.getDuration()); } catch (e) {}
+        wavesurfer.renderer.render(predecoded);
+      } catch (err) {
+        // ignore render errors and continue with normal load
+        console.warn('Pre-render using predecoded buffer failed', err);
+      }
+    }
+
     const fileUrl = URL.createObjectURL(file);
     if (lastObjectUrl) URL.revokeObjectURL(lastObjectUrl);
     lastObjectUrl = fileUrl;
 
+    // still load into wavesurfer for playback & official decode; keep awaiting so rest of flow is preserved
     await wavesurfer.load(fileUrl);
 
     if (typeof onPluginReplaced === 'function') {
@@ -153,7 +171,48 @@ export function initFileLoader({
       onAfterLoad();
     }
     document.dispatchEvent(new Event('file-loaded'));
+    // kick off background preload for the next file (do not await)
+    (async () => {
+      try {
+        if (fileIndex >= 0) await preloadNext(fileIndex);
+      } catch (err) {
+        // preload failures are non-fatal
+        console.warn('Preload next failed', err);
+      }
+    })();
     
+  }
+
+  // background preload: decode next file's ArrayBuffer to AudioBuffer and cache it
+  async function preloadNext(currentIndex) {
+    const files = getFileList();
+    const nextIndex = currentIndex + 1;
+    if (nextIndex < 0 || nextIndex >= files.length) return;
+    // skip if already cached
+    if (getPreloadedDecoded(nextIndex)) return;
+    const file = files[nextIndex];
+    if (!file) return;
+    try {
+      const ab = await file.arrayBuffer();
+      // create temporary AudioContext to decode, then close it when done
+      const AudioCtx = window.OfflineAudioContext || window.AudioContext || window.webkitAudioContext;
+      const audioCtx = new AudioCtx(1, 1, 44100);
+      let decoded = null;
+      try {
+        // modern decodeAudioData returns a Promise
+        decoded = await audioCtx.decodeAudioData(ab);
+      } catch (err) {
+        // some older browsers use callback style
+        decoded = await new Promise((res, rej) => audioCtx.decodeAudioData(ab, res, rej));
+      }
+      try { audioCtx.close && audioCtx.close(); } catch (e) {}
+      if (decoded) {
+        setPreloadedDecoded(nextIndex, decoded);
+      }
+    } catch (err) {
+      // ignore preload errors
+      console.warn('Error preloading next file', err);
+    }
   }
 
   fileInput.addEventListener('change', async (event) => {
