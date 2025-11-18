@@ -272,11 +272,6 @@ class h extends e {
         this.unsubscribeOnScroll = [],
         this.subscriptions = [],
         this.options = t;
-        this._colorCache = new Map();
-        this._gradientCanvas = document.createElement("canvas");
-        this._gradientCanvas.width = 1;
-        this._gradientCanvas.height = 1;
-        this._gradientCtx = this._gradientCanvas.getContext("2d");
         const i = this.parentFromOptionsContainer(t.container);
         this.parent = i;
         const [s,n] = this.initHtml();
@@ -520,20 +515,17 @@ class h extends e {
             return t || "";
         if (t.length < 2)
             return t[0] || "";
-        const dpr = window.devicePixelRatio || 1;
-        const key = JSON.stringify(t) + "@" + dpr;
-        const cached = this._colorCache.get(key);
-        if (cached)
-            return cached;
-        const ctx = this._gradientCtx || (this._gradientCanvas.getContext("2d"));
-        const gradHeight = 100 * dpr;
-        const n = ctx.createLinearGradient(0, 0, 0, gradHeight);
-        const r = 1 / (t.length - 1);
-        for (let idx = 0; idx < t.length; idx++) {
-            n.addColorStop(idx * r, t[idx]);
+        const e = document.createElement("canvas")
+          , i = e.getContext("2d")
+          , s = e.height * (window.devicePixelRatio || 1)
+          , n = i.createLinearGradient(0, 0, 0, s)
+          , r = 1 / (t.length - 1);
+        return t.forEach(( (t, e) => {
+            const i = e * r;
+            n.addColorStop(i, t)
         }
-        this._colorCache.set(key, n);
-        return n;
+        )),
+        n
     }
     getPixelRatio() {
         return Math.max(1, window.devicePixelRatio || 1)
