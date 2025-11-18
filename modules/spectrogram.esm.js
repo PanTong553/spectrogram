@@ -158,8 +158,13 @@ function a(t, e, s, r) {
     for (i = 0; i < t; i++)
         this.sinTable[i] = Math.sin(-Math.PI / i),
         this.cosTable[i] = Math.cos(-Math.PI / i);
+    // allocate reusable temporary arrays to avoid per-call allocations
+    this._o = new Float32Array(t);
+    this._l = new Float32Array(t);
+    this._f = new Float32Array(t >> 1);
+
     this.calculateSpectrum = function(t) {
-        var e, s, r, i = this.bufferSize, a = this.cosTable, n = this.sinTable, h = this.reverseTable, o = new Float32Array(i), l = new Float32Array(i), c = 2 / this.bufferSize, u = Math.sqrt, f = new Float32Array(i / 2), p = Math.floor(Math.log(i) / Math.LN2);
+        var e, s, r, i = this.bufferSize, a = this.cosTable, n = this.sinTable, h = this.reverseTable, o = this._o, l = this._l, c = 2 / this.bufferSize, u = Math.sqrt, f = this._f, p = Math.floor(Math.log(i) / Math.LN2);
         if (Math.pow(2, p) !== i)
             throw "Invalid buffer size, must be a power of 2.";
         if (i !== t.length)
@@ -247,7 +252,23 @@ class h extends s {
         this.numBarkFilters = this.fftSamples / 2,
         this.numErbFilters = this.fftSamples / 2,
         this.createWrapper(),
-        this.createCanvas()
+        this.createCanvas();
+
+        // cache for filter banks to avoid rebuilding on each render
+        this._filterBankCache = {};
+        // cache for resample mappings keyed by inputLen:outputWidth
+        this._resampleCache = {};
+        // precomputed uint8 colormap (RGBA 0-255)
+        this._colorMapUint = new Uint8ClampedArray(256 * 4);
+        if (this.colorMap && this._colorMapUint) {
+            for (let ii = 0; ii < 256; ii++) {
+                const cc = this.colorMap[ii] || [0, 0, 0, 1];
+                this._colorMapUint[ii * 4] = Math.round(255 * cc[0]);
+                this._colorMapUint[ii * 4 + 1] = Math.round(255 * cc[1]);
+                this._colorMapUint[ii * 4 + 2] = Math.round(255 * cc[2]);
+                this._colorMapUint[ii * 4 + 3] = Math.round(255 * cc[3]);
+            }
+        }
     }
     onInit() {
         this.container = this.container || this.wavesurfer.getWrapper(),
@@ -344,12 +365,14 @@ class h extends s {
                   , c = new ImageData(r,l);
                 for (let t = 0; t < o.length; t++)
                     for (let e = 0; e < o[t].length; e++) {
-                        const s = this.colorMap[o[t][e]]
-                          , i = 4 * ((l - e - 1) * r + t);
-                        c.data[i] = 255 * s[0],
-                        c.data[i + 1] = 255 * s[1],
-                        c.data[i + 2] = 255 * s[2],
-                        c.data[i + 3] = 255 * s[3]
+                        let idx = o[t][e];
+                        if (idx < 0) idx = 0; else if (idx > 255) idx = 255;
+                        const cmapBase = idx * 4;
+                        const i = 4 * ((l - e - 1) * r + t);
+                        c.data[i] = this._colorMapUint[cmapBase];
+                        c.data[i + 1] = this._colorMapUint[cmapBase + 1];
+                        c.data[i + 2] = this._colorMapUint[cmapBase + 2];
+                        c.data[i + 3] = this._colorMapUint[cmapBase + 3];
                     }
                 const u = this.hzToScale(a) / this.hzToScale(i)
                   , f = this.hzToScale(n) / this.hzToScale(i)
@@ -364,12 +387,17 @@ class h extends s {
         }
     }
     createFilterBank(t, e, s, r) {
-        const i = s(0)
-          , a = s(e / 2)
-          , n = Array.from({
-            length: t
-        }, ( () => Array(this.fftSamples / 2 + 1).fill(0)))
-          , h = e / this.fftSamples;
+                // cache by scale name + params to avoid rebuilding
+                const cacheKey = `${this.scale}:${t}:${e}:${this.fftSamples}`;
+                if (this._filterBankCache[cacheKey])
+                        return this._filterBankCache[cacheKey];
+
+                const i = s(0)
+                    , a = s(e / 2)
+                    , n = Array.from({
+                        length: t
+                }, ( () => Array(this.fftSamples / 2 + 1).fill(0)))
+                    , h = e / this.fftSamples;
         for (let e = 0; e < t; e++) {
             let s = r(i + e / t * (a - i))
               , o = Math.floor(s / h)
@@ -378,6 +406,7 @@ class h extends s {
             n[e][o] = 1 - c,
             n[e][o + 1] = c
         }
+        this._filterBankCache[cacheKey] = n;
         return n
     }
     hzToMel(t) {
@@ -494,10 +523,10 @@ class h extends s {
             const s = t.getChannelData(e)
               , i = [];
             let a = 0;
-            for (; a + r < s.length; ) {
-                const t = s.slice(a, a + r)
-                  , e = new Uint8Array(r / 2);
-                let n = l.calculateSpectrum(t);
+                        for (; a + r < s.length; ) {
+                                const tSlice = s.subarray(a, a + r)
+                                    , e = new Uint8Array(r / 2);
+                                let n = l.calculateSpectrum(tSlice);
                 c && (n = this.applyFilterBank(n, c));
                 for (let t = 0; t < r / 2; t++) {
                     const s = n[t] > 1e-12 ? n[t] : 1e-12
@@ -564,33 +593,50 @@ class h extends s {
             }
     }
     resample(t) {
-        const e = this.getWidth()
-          , s = []
-          , r = 1 / t.length
-          , i = 1 / e;
-        let a;
-        for (a = 0; a < e; a++) {
-            const e = new Array(t[0].length);
-            let n;
-            for (n = 0; n < t.length; n++) {
-                const s = n * r
-                  , h = s + r
-                  , o = a * i
-                  , l = o + i
-                  , c = Math.max(0, Math.min(h, l) - Math.max(s, o));
-                let u;
-                if (c > 0)
-                    for (u = 0; u < t[0].length; u++)
-                        null == e[u] && (e[u] = 0),
-                        e[u] += c / i * t[n][u]
+        const outW = this.getWidth()
+          , out = []
+          , invIn = 1 / t.length;
+
+        const cacheKey = `${t.length}:${outW}`;
+        let mapping = this._resampleCache[cacheKey];
+        if (!mapping) {
+            mapping = new Array(outW);
+            const invOut = 1 / outW;
+            for (let a = 0; a < outW; a++) {
+                const contrib = [];
+                for (let n = 0; n < t.length; n++) {
+                    const s = n * invIn;
+                    const h = s + invIn;
+                    const o = a * invOut;
+                    const l = o + invOut;
+                    const c = Math.max(0, Math.min(h, l) - Math.max(s, o));
+                    if (c > 0)
+                        contrib.push([n, c / invOut]);
+                }
+                mapping[a] = contrib;
             }
-            const h = new Uint8Array(t[0].length);
-            let o;
-            for (o = 0; o < t[0].length; o++)
-                h[o] = e[o];
-            s.push(h)
+            this._resampleCache[cacheKey] = mapping;
         }
-        return s
+
+        for (let a = 0; a < outW; a++) {
+            const accum = new Array(t[0].length);
+            const contrib = mapping[a];
+            for (let j = 0; j < contrib.length; j++) {
+                const nIdx = contrib[j][0];
+                const weight = contrib[j][1];
+                const src = t[nIdx];
+                for (let u = 0; u < src.length; u++) {
+                    if (accum[u] == null)
+                        accum[u] = 0;
+                    accum[u] += weight * src[u];
+                }
+            }
+            const outArr = new Uint8Array(t[0].length);
+            for (let o = 0; o < t[0].length; o++)
+                outArr[o] = accum[o];
+            out.push(outArr);
+        }
+        return out
     }
 }
 export {h as default};
