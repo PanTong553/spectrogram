@@ -4,8 +4,6 @@ let twiddleFactorCache = new Map();
 // 緩衝重用與 bit-reverse 快取
 let bufferPool = new Map(); // key: N -> { real: Float32Array, imag: Float32Array }
 let bitReverseCache = new Map();
-let spectrumPool = new Map(); // key: halfN -> Float32Array
-let filterBankCache = new Map(); // key: scale:numFilters:sampleRate:fftSize -> filterBank
 // color map and options
 let colorMapUint = null; // Uint8ClampedArray(256*4)
 let resampleMapCache = new Map();
@@ -40,17 +38,7 @@ self.onmessage = (e) => {
 function renderSpectrogram(signal, sr, fftSize, overlapPct, opts = {}) {
   const hop = Math.max(1, Math.floor(fftSize * (1 - overlapPct / 100)));
   const width = Math.max(1, Math.ceil((signal.length - fftSize) / hop));
-  const fftHalf = Math.floor(fftSize / 2);
-  // decide whether to use filter-bank (scale)
-  const scale = opts.scale || currentOptions.scale || null;
-  const scaleTypes = ['mel', 'logarithmic', 'bark', 'erb'];
-  let filterBank = null;
-  let numFilters = null;
-  if (scale && scaleTypes.includes(scale)) {
-    numFilters = opts.numFilters || Math.max(1, fftHalf);
-    filterBank = createFilterBankCached(scale, numFilters, sr, fftSize);
-  }
-  const height = filterBank ? numFilters : fftHalf;
+  const height = fftSize / 2;
   canvas.width = width;
   canvas.height = height;
   const img = ctx.createImageData(width, height);
@@ -77,45 +65,30 @@ function renderSpectrogram(signal, sr, fftSize, overlapPct, opts = {}) {
     
     // 使用優化的 FFT（傳入 bit-reverse 快取）
     fftOptimized(real, imag, twiddleFactors, bitReverse);
-
-    // 建立頻譜 magnitude（0..fftHalf-1）並放入 spectrum 陣列
-    const spectrum = getSpectrumCached(fftHalf);
-    for (let k = 0; k < fftHalf; k++) {
-      const magSq = real[k] * real[k] + imag[k] * imag[k];
-      spectrum[k] = Math.sqrt(magSq);
-    }
-
-    // 若使用 filter bank，對頻譜套用 filter，否則直接使用 spectrum
-    let energyArr;
-    if (filterBank) {
-      energyArr = applyFilterBank(spectrum, filterBank);
-    } else {
-      energyArr = spectrum;
-    }
-
-    // 以 dB scale 與 gain/range 做映射到 0..255
-    const gainDB = (opts.gainDB != null) ? opts.gainDB : currentOptions.gainDB;
-    const rangeDB = (opts.rangeDB != null) ? opts.rangeDB : currentOptions.rangeDB;
+    
+    // 批量繪製像素，減少運算次數。使用 colorMapUint 若有提供。
     for (let y = 0; y < height; y++) {
-      const s = energyArr[y] > 1e-12 ? energyArr[y] : 1e-12;
-      const db = 20 * Math.log10(s);
-      let colIdx;
-      if (db < -gainDB - rangeDB) colIdx = 0;
-      else if (db > -gainDB) colIdx = 255;
-      else colIdx = Math.round(((db + gainDB) / rangeDB) * 255);
+      const magSq = real[y] * real[y] + imag[y] * imag[y];
+      const mag = Math.sqrt(magSq);
 
-      const idxPixel = (height - 1 - y) * width + x;
-      const pixelIdx = idxPixel * 4;
+      // 快速對數規範化
+      let val = mag > 1e-12 ? Math.log10(mag) / 5 : -2.4;
+      val = val < 0 ? 0 : (val > 1 ? 1 : val);
+
+      const col = Math.floor(val * 255);
+      const idx = (height - 1 - y) * width + x;
+      const pixelIdx = idx * 4;
+
       if (colorMapUint) {
-        const cmapBase = colIdx * 4;
+        const cmapBase = col * 4;
         imgData[pixelIdx] = colorMapUint[cmapBase];
         imgData[pixelIdx + 1] = colorMapUint[cmapBase + 1];
         imgData[pixelIdx + 2] = colorMapUint[cmapBase + 2];
         imgData[pixelIdx + 3] = colorMapUint[cmapBase + 3];
       } else {
-        imgData[pixelIdx] = colIdx;
-        imgData[pixelIdx + 1] = colIdx;
-        imgData[pixelIdx + 2] = colIdx;
+        imgData[pixelIdx] = col;
+        imgData[pixelIdx + 1] = col;
+        imgData[pixelIdx + 2] = col;
         imgData[pixelIdx + 3] = 255;
       }
     }
@@ -190,76 +163,6 @@ function getResampleMap(srcLen, outW) {
   }
   resampleMapCache.set(key, mapping);
   return mapping;
-}
-
-function getSpectrumCached(halfN) {
-  if (!spectrumPool.has(halfN)) spectrumPool.set(halfN, new Float32Array(halfN));
-  return spectrumPool.get(halfN);
-}
-
-// Scale conversion helpers (adapted from modules/spectrogram.esm.js)
-function hzToMel(t) { return 2595 * Math.log10(1 + t / 700); }
-function melToHz(t) { return 700 * (Math.pow(10, t / 2595) - 1); }
-function hzToLog(t) { return Math.log10(Math.max(1, t)); }
-function logToHz(t) { return Math.pow(10, t); }
-function hzToBark(t) {
-  let e = 26.81 * t / (1960 + t) - .53;
-  if (e < 2) e += .15 * (2 - e);
-  if (e > 20.1) e += .22 * (e - 20.1);
-  return e;
-}
-function barkToHz(t) {
-  if (t < 2) t = (t - .3) / .85;
-  if (t > 20.1) t = (t + 4.422) / 1.22;
-  return (t + .53) / (26.28 - t) * 1960;
-}
-const N_CONST = 1e3 * Math.log(10) / 107.939;
-function hzToErb(t) { return N_CONST * Math.log10(1 + .00437 * t); }
-function erbToHz(t) { return (Math.pow(10, t / N_CONST) - 1) / .00437; }
-
-function createFilterBankCached(scale, numFilters, sampleRate, fftSize) {
-  const key = `${scale}:${numFilters}:${sampleRate}:${fftSize}`;
-  if (filterBankCache.has(key)) return filterBankCache.get(key);
-
-  const fftHalf = Math.floor(fftSize / 2);
-  const hzToScale = (scale === 'mel') ? hzToMel : (scale === 'logarithmic' ? hzToLog : (scale === 'bark' ? hzToBark : (scale === 'erb' ? hzToErb : null)));
-  const scaleToHz = (scale === 'mel') ? melToHz : (scale === 'logarithmic' ? logToHz : (scale === 'bark' ? barkToHz : (scale === 'erb' ? erbToHz : null)));
-  if (!hzToScale || !scaleToHz) return null;
-
-  const i0 = hzToScale(0);
-  const i1 = hzToScale(sampleRate / 2);
-  const filterBank = new Array(numFilters);
-  const h = sampleRate / fftSize;
-  for (let e = 0; e < numFilters; e++) {
-    const center = scaleToHz(i0 + e / numFilters * (i1 - i0));
-    let o = Math.floor(center / h);
-    if (o < 0) o = 0;
-    if (o > fftHalf) o = fftHalf;
-    const l = o * h;
-    const denom = ((o + 1) * h - l) || 1;
-    const c = (center - l) / denom;
-    const row = new Float32Array(fftHalf + 1);
-    if (o >= 0 && o <= fftHalf) row[o] = 1 - c;
-    if (o + 1 >= 0 && o + 1 <= fftHalf) row[o + 1] = c;
-    filterBank[e] = row;
-  }
-  filterBankCache.set(key, filterBank);
-  return filterBank;
-}
-
-function applyFilterBank(spectrum, filterBank) {
-  const numFilters = filterBank.length;
-  const out = new Float32Array(numFilters);
-  for (let i = 0; i < numFilters; i++) {
-    const row = filterBank[i];
-    let acc = 0;
-    for (let k = 0; k < row.length; k++) {
-      const w = row[k];
-      if (w !== 0) acc += spectrum[k] * w;
-    }
-    out[i] = acc;
-  }
-  return out;
 }
 
 // 取得可重用的 FFT 緩衝（real/imag）
