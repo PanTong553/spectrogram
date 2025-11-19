@@ -160,6 +160,35 @@ export function initFrequencyHover({
     const moveEv = type === 'touch' ? 'touchmove' : 'mousemove';
     const upEv = type === 'touch' ? 'touchend' : 'mouseup';
 
+    // Ctrl-key state while drawing
+    let ctrlPressed = false;
+    // Create ctrl icon element and keyboard handlers; visibility controlled below
+    const ctrlIcon = document.createElement('i');
+    ctrlIcon.className = 'fa-solid fa-magnifying-glass selection-ctrl-icon';
+    ctrlIcon.style.position = 'absolute';
+    ctrlIcon.style.left = '50%';
+    ctrlIcon.style.top = '50%';
+    ctrlIcon.style.transform = 'translate(-50%, -50%)';
+    ctrlIcon.style.pointerEvents = 'none';
+    ctrlIcon.style.display = 'none';
+    selectionRect.appendChild(ctrlIcon);
+
+    const keyDownHandler = (ev) => {
+      if (ev.key === 'Control') {
+        ctrlPressed = true;
+        ctrlIcon.style.display = '';
+      }
+    };
+    const keyUpHandler = (ev) => {
+      if (ev.key === 'Control') {
+        ctrlPressed = false;
+        ctrlIcon.style.display = 'none';
+      }
+    };
+    // Attach keyboard listeners while drawing so icon responds even without mouse move
+    window.addEventListener('keydown', keyDownHandler);
+    window.addEventListener('keyup', keyUpHandler);
+
     const moveHandler = (ev) => {
       if (!isDrawing) return;
       const viewerRect = viewer.getBoundingClientRect();
@@ -183,6 +212,14 @@ export function initFrequencyHover({
       selectionRect.style.top = `${y}px`;
       selectionRect.style.width = `${width}px`;
       selectionRect.style.height = `${height}px`;
+
+      // Update ctrl icon visibility depending on current ctrl state (mouse event or keyboard)
+      const evtCtrl = type === 'touch' ? false : !!(ev.ctrlKey);
+      if (evtCtrl || ctrlPressed) {
+        ctrlIcon.style.display = '';
+      } else {
+        ctrlIcon.style.display = 'none';
+      }
     };
 
     const upHandler = (ev) => {
@@ -190,6 +227,8 @@ export function initFrequencyHover({
       isDrawing = false;
       window.removeEventListener(moveEv, moveHandler);
       window.removeEventListener(upEv, upHandler);
+      window.removeEventListener('keydown', keyDownHandler);
+      window.removeEventListener('keyup', keyUpHandler);
       hideSelectionTimeInfo();
 
       const rect = selectionRect.getBoundingClientRect();
@@ -201,6 +240,9 @@ export function initFrequencyHover({
       const minThreshold = 3;
       if (width <= minThreshold || height <= minThreshold) {
         viewer.removeChild(selectionRect);
+        // cleanup keyboard handlers added during drawing
+        window.removeEventListener('keydown', keyDownHandler);
+        window.removeEventListener('keyup', keyUpHandler);
         selectionRect = null;
         suppressHover = false;
         if (type === 'touch') {
@@ -230,6 +272,21 @@ export function initFrequencyHover({
         if (lastClientX >= box.left && lastClientX <= box.right &&
             lastClientY >= box.top && lastClientY <= box.bottom) {
           hoveredSelection = newSel;
+        }
+      }
+      // If Ctrl was pressed during selection completion, immediately trigger expand-selection
+      const completedWithCtrl = ctrlPressed || (ev && ev.ctrlKey);
+      if (completedWithCtrl) {
+        // behave like clicking expand button
+        suppressHover = false;
+        isOverBtnGroup = false;
+        viewer.dispatchEvent(new CustomEvent('expand-selection', {
+          detail: { startTime: newSel.data.startTime, endTime: newSel.data.endTime }
+        }));
+        if (lastClientX !== null && lastClientY !== null) {
+          setTimeout(() => {
+            updateHoverDisplay({ clientX: lastClientX, clientY: lastClientY });
+          }, 0);
         }
       }
     };
