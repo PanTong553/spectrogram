@@ -1732,16 +1732,6 @@ input.tag-button.editing {
   color: #363636;
 }
 
-/* Separator used between map control buttons (1px vertical line) */
-.leaflet-control-separator {
-  display: inline-block;
-  width: 1px;
-  height: 24px;
-  margin: 6px 6px;
-  background: rgba(0,0,0,0.12);
-  vertical-align: middle;
-}
-
 /* Export button */
 .leaflet-export-control a {
   width: 26px;
