@@ -1,6 +1,9 @@
 let canvas, ctx, sampleRate = 44100;
 let windowCache = new Map();
 let twiddleFactorCache = new Map();
+// 緩衝重用與 bit-reverse 快取
+let bufferPool = new Map(); // key: N -> { real: Float32Array, imag: Float32Array }
+let bitReverseCache = new Map();
 
 self.onmessage = (e) => {
   const { type } = e.data;
@@ -24,9 +27,9 @@ function renderSpectrogram(signal, sr, fftSize, overlapPct) {
   const imgData = img.data;
   const window = getWindowCached(fftSize);
   
-  // 預先分配並複用數組，避免重複創建
-  const real = new Float32Array(fftSize);
-  const imag = new Float32Array(fftSize);
+  // 取得（或建立）可重用的緩衝，避免重複配置
+  const { real, imag } = getBuffersCached(fftSize);
+  const bitReverse = getBitReverseCached(fftSize);
   
   // 預計算幅度值的規範化常數
   const invHeight = 1.0 / height;
@@ -42,8 +45,8 @@ function renderSpectrogram(signal, sr, fftSize, overlapPct) {
       imag[j] = 0;
     }
     
-    // 使用優化的 FFT
-    fftOptimized(real, imag, twiddleFactors);
+    // 使用優化的 FFT（傳入 bit-reverse 快取）
+    fftOptimized(real, imag, twiddleFactors, bitReverse);
     
     // 批量繪製像素，減少運算次數
     for (let y = 0; y < height; y++) {
@@ -96,6 +99,33 @@ function getTwiddleFactorsCached(N) {
   return twiddleFactorCache.get(N);
 }
 
+// 取得可重用的 FFT 緩衝（real/imag）
+function getBuffersCached(N) {
+  if (!bufferPool.has(N)) {
+    bufferPool.set(N, { real: new Float32Array(N), imag: new Float32Array(N) });
+  }
+  return bufferPool.get(N);
+}
+
+// 產生並快取 bit-reverse 索引陣列
+function getBitReverseCached(N) {
+  if (!bitReverseCache.has(N)) {
+    const bits = Math.log2(N);
+    const rev = new Uint32Array(N);
+    for (let i = 0; i < N; i++) {
+      let x = i;
+      let y = 0;
+      for (let j = 0; j < bits; j++) {
+        y = (y << 1) | (x & 1);
+        x >>= 1;
+      }
+      rev[i] = y;
+    }
+    bitReverseCache.set(N, rev);
+  }
+  return bitReverseCache.get(N);
+}
+
 function hannWindow(N) {
   const win = new Float32Array(N);
   const invN = 1 / (N - 1);
@@ -107,36 +137,46 @@ function hannWindow(N) {
 }
 
 // 優化的 FFT，使用預計算的 twiddle factors
-function fftOptimized(real, imag, twiddleFactors) {
+function fftOptimized(real, imag, twiddleFactors, bitReverse) {
   const n = real.length;
-  
-  // 位反轉排列（Bit-reversal permutation）
-  let j = 0;
-  for (let i = 1; i < n - 1; i++) {
-    let n1 = n >> 1;
-    while (j >= n1) { j -= n1; n1 >>= 1; }
-    j += n1;
-    
-    if (j > i) {
-      let temp = real[i]; real[i] = real[j]; real[j] = temp;
-      temp = imag[i]; imag[i] = imag[j]; imag[j] = temp;
+
+  // 位反轉排列（Bit-reversal permutation） - 使用快取索引以減少操作
+  if (bitReverse) {
+    for (let i = 0; i < n; i++) {
+      const j = bitReverse[i];
+      if (j > i) {
+        let temp = real[i]; real[i] = real[j]; real[j] = temp;
+        temp = imag[i]; imag[i] = imag[j]; imag[j] = temp;
+      }
+    }
+  } else {
+    // 備援：原本的位反轉演算法
+    let j = 0;
+    for (let i = 1; i < n - 1; i++) {
+      let n1 = n >> 1;
+      while (j >= n1) { j -= n1; n1 >>= 1; }
+      j += n1;
+      if (j > i) {
+        let temp = real[i]; real[i] = real[j]; real[j] = temp;
+        temp = imag[i]; imag[i] = imag[j]; imag[j] = temp;
+      }
     }
   }
-  
+
   // 蝴蝶操作（Butterfly operations）
   for (let stage = 0; stage < twiddleFactors.length; stage++) {
     const factors = twiddleFactors[stage];
     const n2 = 1 << (stage + 1);
     const n1 = n2 >> 1;
-    
+
     for (let j = 0; j < n1; j++) {
       const { c, s } = factors[j];
-      
+
       for (let i = j; i < n; i += n2) {
         const k = i + n1;
         const tr = c * real[k] - s * imag[k];
         const ti = c * imag[k] + s * real[k];
-        
+
         real[k] = real[i] - tr;
         imag[k] = imag[i] - ti;
         real[i] += tr;
