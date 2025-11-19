@@ -76,6 +76,7 @@ export function initMapPopup({
   let kmlPolylines = [];
   let importBtn = null;
   let clearKmlBtn = null;
+  let clearTextBtn = null;
   let drawBtn = null;
   let textBtn = null;
   let professionalBtn = null;
@@ -743,6 +744,36 @@ export function initMapPopup({
           .on(link, 'mousedown', L.DomEvent.stopPropagation)
           .on(link, 'dblclick', L.DomEvent.stopPropagation)
           .on(link, 'click', toggleTextMode);
+
+        // Clear Text button (same style as text toggle control)
+        const clearLink = L.DomUtil.create('a', '', container);
+        clearLink.href = '#';
+        clearLink.title = 'Clear Text';
+        clearLink.innerHTML = '<i class="fa-solid fa-broom"></i>';
+        clearTextBtn = clearLink;
+        L.DomEvent.on(clearLink, 'click', L.DomEvent.stop)
+          .on(clearLink, 'mousedown', L.DomEvent.stopPropagation)
+          .on(clearLink, 'dblclick', L.DomEvent.stopPropagation)
+          .on(clearLink, 'click', (ev) => {
+            try {
+              ev.preventDefault();
+            } catch (e) {}
+            showMessageBox({
+              message: 'Confirm to clear all text?',
+              confirmText: 'Confirm',
+              cancelText: 'Cancel',
+              onConfirm: () => {
+                try {
+                  // remove all text markers from map
+                  textMarkers.forEach(m => {
+                    try { if (map && m) map.removeLayer(m); } catch (e) {}
+                  });
+                  textMarkers = [];
+                  updateMarkerPointerEvents();
+                } catch (e) {}
+              }
+            });
+          });
         return container;
       }
     });
