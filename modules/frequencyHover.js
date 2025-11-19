@@ -288,6 +288,8 @@ export function initFrequencyHover({
             updateHoverDisplay({ clientX: lastClientX, clientY: lastClientY });
           }, 0);
         }
+        // remove the created selection visuals (no btn group / duration)
+        removeSelection(newSel);
       }
     };
 
