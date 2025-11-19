@@ -745,6 +745,9 @@ export function initMapPopup({
           .on(link, 'dblclick', L.DomEvent.stopPropagation)
           .on(link, 'click', toggleTextMode);
 
+        // Separator between text button and clear button
+        const sep = L.DomUtil.create('span', 'leaflet-control-separator', container);
+
         // Clear Text button (same style as text toggle control)
         const clearLink = L.DomUtil.create('a', '', container);
         clearLink.href = '#';
