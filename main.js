@@ -78,7 +78,8 @@ let ignoreNextPause = false;
 const canvasElem = document.getElementById("spectrogram-canvas");
 const offscreen = canvasElem.transferControlToOffscreen();
 const specWorker = new Worker("./spectrogramWorker.js", { type: "module" });
-specWorker.postMessage({ type: "init", canvas: offscreen }, [offscreen]);
+// 傳入初始 options（colorMap 和 windowFunc）給 worker
+specWorker.postMessage({ type: "init", canvas: offscreen, options: { colorMap: getCurrentColorMap(), windowFunc: currentWindowType, gainDB: 20, rangeDB: 80 } }, [offscreen]);
 
 const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 if (isMobileDevice) {
@@ -1413,7 +1414,7 @@ document.addEventListener("file-loaded", async () => {
     const workerOverlap = currentOverlap === 'auto'
       ? getAutoOverlapPercent()
       : getOverlapPercent();
-    specWorker.postMessage({ type: "render", buffer: audioBuf.getChannelData(0), sampleRate: audioBuf.sampleRate, fftSize: currentFftSize, overlap: workerOverlap }, [audioBuf.getChannelData(0).buffer]);
+    specWorker.postMessage({ type: "render", buffer: audioBuf.getChannelData(0), sampleRate: audioBuf.sampleRate, fftSize: currentFftSize, overlap: workerOverlap, options: { colorMap: getCurrentColorMap(), windowFunc: currentWindowType } }, [audioBuf.getChannelData(0).buffer]);
     updateSpectrogramSettingsText();
   }
 });

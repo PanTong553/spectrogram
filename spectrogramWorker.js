@@ -4,6 +4,15 @@ let twiddleFactorCache = new Map();
 // 緩衝重用與 bit-reverse 快取
 let bufferPool = new Map(); // key: N -> { real: Float32Array, imag: Float32Array }
 let bitReverseCache = new Map();
+// color map and options
+let colorMapUint = null; // Uint8ClampedArray(256*4)
+let resampleMapCache = new Map();
+let currentOptions = {
+  colorMap: null,
+  windowFunc: 'hann',
+  gainDB: 20,
+  rangeDB: 80,
+};
 
 self.onmessage = (e) => {
   const { type } = e.data;
@@ -11,13 +20,22 @@ self.onmessage = (e) => {
     canvas = e.data.canvas;
     sampleRate = e.data.sampleRate || sampleRate;
     ctx = canvas.getContext('2d');
+    if (e.data.options) {
+      currentOptions = Object.assign({}, currentOptions, e.data.options);
+      if (currentOptions.colorMap) setColorMapUint(currentOptions.colorMap);
+    }
+  } else if (type === 'setOptions') {
+    currentOptions = Object.assign({}, currentOptions, e.data.options || {});
+    if (e.data.options && e.data.options.colorMap) setColorMapUint(e.data.options.colorMap);
   } else if (type === 'render') {
     if (!ctx) return;
-    renderSpectrogram(e.data.buffer, e.data.sampleRate || sampleRate, e.data.fftSize || 1024, e.data.overlap || 0);
+    const opts = Object.assign({}, currentOptions, e.data.options || {});
+    if (opts.colorMap) setColorMapUint(opts.colorMap);
+    renderSpectrogram(e.data.buffer, e.data.sampleRate || sampleRate, e.data.fftSize || 1024, e.data.overlap || 0, opts);
   }
 };
 
-function renderSpectrogram(signal, sr, fftSize, overlapPct) {
+function renderSpectrogram(signal, sr, fftSize, overlapPct, opts = {}) {
   const hop = Math.max(1, Math.floor(fftSize * (1 - overlapPct / 100)));
   const width = Math.max(1, Math.ceil((signal.length - fftSize) / hop));
   const height = fftSize / 2;
@@ -48,24 +66,31 @@ function renderSpectrogram(signal, sr, fftSize, overlapPct) {
     // 使用優化的 FFT（傳入 bit-reverse 快取）
     fftOptimized(real, imag, twiddleFactors, bitReverse);
     
-    // 批量繪製像素，減少運算次數
+    // 批量繪製像素，減少運算次數。使用 colorMapUint 若有提供。
     for (let y = 0; y < height; y++) {
       const magSq = real[y] * real[y] + imag[y] * imag[y];
       const mag = Math.sqrt(magSq);
-      
-      // 快速對數規範化（避免多次 Math.log10 調用）
+
+      // 快速對數規範化
       let val = mag > 1e-12 ? Math.log10(mag) / 5 : -2.4;
       val = val < 0 ? 0 : (val > 1 ? 1 : val);
-      
+
       const col = Math.floor(val * 255);
       const idx = (height - 1 - y) * width + x;
       const pixelIdx = idx * 4;
-      
-      // 直接操作 Uint8ClampedArray
-      imgData[pixelIdx] = col;
-      imgData[pixelIdx + 1] = col;
-      imgData[pixelIdx + 2] = col;
-      imgData[pixelIdx + 3] = 255;
+
+      if (colorMapUint) {
+        const cmapBase = col * 4;
+        imgData[pixelIdx] = colorMapUint[cmapBase];
+        imgData[pixelIdx + 1] = colorMapUint[cmapBase + 1];
+        imgData[pixelIdx + 2] = colorMapUint[cmapBase + 2];
+        imgData[pixelIdx + 3] = colorMapUint[cmapBase + 3];
+      } else {
+        imgData[pixelIdx] = col;
+        imgData[pixelIdx + 1] = col;
+        imgData[pixelIdx + 2] = col;
+        imgData[pixelIdx + 3] = 255;
+      }
     }
   }
   
@@ -97,6 +122,47 @@ function getTwiddleFactorsCached(N) {
     twiddleFactorCache.set(N, factors);
   }
   return twiddleFactorCache.get(N);
+}
+
+// 建立/更新 colorMap 的 Uint8ClampedArray 表
+function setColorMapUint(colorMap) {
+  if (!colorMap || !colorMap.length) {
+    // clear to fallback
+    colorMapUint = null;
+    return;
+  }
+  const arr = new Uint8ClampedArray(256 * 4);
+  for (let ii = 0; ii < 256; ii++) {
+    const cc = colorMap[ii] || [0, 0, 0, 1];
+    arr[ii * 4] = Math.round(255 * (cc[0] || 0));
+    arr[ii * 4 + 1] = Math.round(255 * (cc[1] || 0));
+    arr[ii * 4 + 2] = Math.round(255 * (cc[2] || 0));
+    arr[ii * 4 + 3] = Math.round(255 * (cc[3] == null ? 1 : cc[3]));
+  }
+  colorMapUint = arr;
+}
+
+// resample 映射快取：給定 source length 與 output width，回傳 mapping
+function getResampleMap(srcLen, outW) {
+  const key = `${srcLen}:${outW}`;
+  if (resampleMapCache.has(key)) return resampleMapCache.get(key);
+  const mapping = new Array(outW);
+  const invIn = 1 / srcLen;
+  const invOut = 1 / outW;
+  for (let a = 0; a < outW; a++) {
+    const contrib = [];
+    for (let n = 0; n < srcLen; n++) {
+      const s = n * invIn;
+      const h = s + invIn;
+      const o = a * invOut;
+      const l = o + invOut;
+      const c = Math.max(0, Math.min(h, l) - Math.max(s, o));
+      if (c > 0) contrib.push([n, c / invOut]);
+    }
+    mapping[a] = contrib;
+  }
+  resampleMapCache.set(key, mapping);
+  return mapping;
 }
 
 // 取得可重用的 FFT 緩衝（real/imag）
